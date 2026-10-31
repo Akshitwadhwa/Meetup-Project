@@ -264,7 +264,7 @@
       <div class="room-code" id="room-count">${escapeHtml(activeRoom.code)} · ${profiles.length} ${profiles.length === 1 ? 'HUMAN' : 'HUMANS'}</div>
       <div class="member-list">${cards || '<p class="fine">You’re the first one here. Invite someone in!</p>'}</div>
       <p class="fine">${client ? 'Profiles refresh as people join the room.' : 'Local preview only: this browser stores the profiles.'}</p>
-      <button class="button button-lime" id="start-game">Start the swipe game 🎬</button>
+      <button class="button button-lime" id="start-game">Start the voice game 🎙️</button>
       <button class="button button-lime" id="done">Back to the vibe ↗</button></div>`;
     bindClose();
     content.querySelector('#start-game').addEventListener('click', () => startGame(yourName));
@@ -294,14 +294,47 @@
   function renderGameCard() {
     const title = GAME_TITLES[gameIndex];
     const done = Object.keys(gameVotes.own || {}).length;
-    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="joined game-screen"><div class="mono modal-kicker">SIDEQUEST WATCHLIST · ${done + 1} / ${GAME_TITLES.length}</div><div class="game-art">${title.art}</div><div class="mono">${title.year} · MOVIE / SERIES</div><h2 id="modal-title">${escapeHtml(title.title)}</h2><p>${escapeHtml(title.note)}</p><div class="game-meter"><i style="width:${Math.round(done / GAME_TITLES.length * 100)}%"></i></div><p class="fine">Swipe right for into it · left for pass · up if you haven’t seen it</p><div class="game-actions"><button class="game-nope" data-vote="nope">👎<small>PASS</small></button><button class="game-unseen" data-vote="unseen">🤷<small>NOT SEEN</small></button><button class="game-like" data-vote="like">💚<small>INTO IT</small></button></div><p class="fine">Your picks stay hidden until you finish the round.</p></div>`;
+    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="joined game-screen"><div class="mono modal-kicker">SIDEQUEST WATCHLIST · ${done + 1} / ${GAME_TITLES.length}</div><div class="game-art">${title.art}</div><div class="mono">${title.year} · MOVIE / SERIES</div><h2 id="modal-title">${escapeHtml(title.title)}</h2><p>${escapeHtml(title.note)}</p><div class="game-meter"><i style="width:${Math.round(done / GAME_TITLES.length * 100)}%"></i></div><section class="game-voice" aria-label="Vote with Wispr Flow"><div class="game-voice-title"><span>🎙️</span><div><b>Say your vote</b><small>Focus this field, start Wispr Flow, and say one choice.</small></div></div><input id="game-command" type="text" autocomplete="off" autocapitalize="off" placeholder="Like, dislike, or not seen" aria-label="Say like, dislike, or not seen"><p class="game-voice-status" id="game-voice-status" role="status" aria-live="polite">Your vote saves and the next title appears.</p></section><p class="fine game-fallback-label">Prefer tapping?</p><div class="game-actions"><button class="game-nope" data-vote="nope">👎<small>DISLIKE</small></button><button class="game-unseen" data-vote="unseen">🤷<small>NOT SEEN</small></button><button class="game-like" data-vote="like">💚<small>LIKE</small></button></div><p class="fine">Your picks stay hidden until you finish the round.</p></div>`;
     bindClose();
     content.querySelectorAll('[data-vote]').forEach((button) => button.addEventListener('click', () => saveGameVote(title, button.dataset.vote)));
+    const command = content.querySelector('#game-command');
+    const status = content.querySelector('#game-voice-status');
+    let commandTimer;
+    let isSaving = false;
+    command.addEventListener('input', () => {
+      clearTimeout(commandTimer);
+      commandTimer = setTimeout(async () => {
+        if (isSaving) return;
+        const vote = parseGameVote(command.value);
+        if (!vote) {
+          status.textContent = 'Try one short command: “like”, “dislike”, or “not seen”.';
+          status.dataset.state = 'error';
+          return;
+        }
+        isSaving = true;
+        status.dataset.state = 'saving';
+        status.textContent = `Got it — ${vote === 'like' ? 'like' : vote === 'nope' ? 'dislike' : 'not seen'}. Saving…`;
+        command.disabled = true;
+        await saveGameVote(title, vote);
+      }, 350);
+    });
+    setTimeout(() => command.isConnected && command.focus({ preventScroll: true }), 120);
+  }
+
+  function parseGameVote(value) {
+    const phrase = value.toLowerCase().trim().replace(/[’']/g, '').replace(/[.!?,]/g, '').replace(/\s+/g, ' ');
+    const likes = ['like', 'liked', 'liked it', 'love it', 'loved it', 'into it', 'yes', 'thumbs up', 'i like it', 'i liked it', 'i love it'];
+    const dislikes = ['dislike', 'disliked', 'dislike it', 'dont like it', 'i dont like it', 'didnt like it', 'i didnt like it', 'not for me', 'pass', 'no', 'thumbs down'];
+    const unseen = ['not seen', 'not seen it', 'havent seen it', 'i havent seen it', 'havent seen this', 'have not seen it', 'unseen', 'not watched', 'havent watched it', 'never seen it'];
+    if (likes.includes(phrase)) return 'like';
+    if (dislikes.includes(phrase)) return 'nope';
+    if (unseen.includes(phrase)) return 'unseen';
+    return null;
   }
 
   async function saveGameVote(title, vote) {
     const button = content.querySelector(`[data-vote="${vote}"]`);
-    button.disabled = true;
+    if (button) button.disabled = true;
     gameVotes.own[title.id] = vote;
     try {
       if (client) {
@@ -313,7 +346,17 @@
       gameIndex += 1;
       if (gameIndex >= GAME_TITLES.length) showGameResults(activeGameName);
       else renderGameCard();
-    } catch (error) { gameVotes.own[title.id] = undefined; showMessage(content.querySelector('.fine:last-child'), friendlyError(error)); button.disabled = false; }
+    } catch (error) {
+      delete gameVotes.own[title.id];
+      const status = content.querySelector('#game-voice-status');
+      if (status) {
+        status.textContent = `${friendlyError(error)} Dictate the vote again or use a button.`;
+        status.dataset.state = 'error';
+      } else showMessage(content.querySelector('.fine:last-child'), friendlyError(error));
+      const command = content.querySelector('#game-command');
+      if (command) { command.disabled = false; command.value = ''; command.focus({ preventScroll: true }); }
+      if (button) button.disabled = false;
+    }
   }
 
   async function showGameResults(yourName) {

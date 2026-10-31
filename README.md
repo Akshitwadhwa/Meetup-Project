@@ -11,10 +11,10 @@ SideQuest is a voice-friendly meetup icebreaker. Attendees join a shared room wi
 1. Open the site and choose **Join a room**. Use the code shown by the organizer; `FLOW26` is the Gurugram meetup room.
 2. Choose a display name and write a short intro. If Wispr Flow is available on your device, use it to dictate directly into the bio field. SideQuest does not call a Wispr Flow API or upload audio.
 3. After joining, you appear on the room board with the other attendees.
-4. Tap **Start the swipe game**. For each movie or series, choose **Into it**, **Pass**, or **Not seen**. Your choices are saved as you go.
+4. Tap **Start the voice game**. Focus the vote field, start Wispr Flow, and say **“like,” “dislike,”** or **“not seen.”** SideQuest saves the vote and advances to the next title. Buttons remain available as a fallback.
 5. When you finish, see which titles are getting shared love in the room. You can play again or return to the board.
 
-The current game uses ten titles: *Interstellar*, *Inception*, *The Office*, *Stranger Things*, *Breaking Bad*, *The Bear*, *Black Mirror*, *Sacred Games*, *Succession*, and *Dune: Part Two*. The result list highlights titles liked by at least half the room, with a minimum of two people.
+The current voice game uses ten titles: *Interstellar*, *Inception*, *The Office*, *Stranger Things*, *Breaking Bad*, *The Bear*, *Black Mirror*, *Sacred Games*, *Succession*, and *Dune: Part Two*. The result list highlights titles liked by at least half the room, with a minimum of two people. Wispr Flow inserts the dictated command into the focused field; the site does not record audio or control the Flow app.
 
 ## Create and share a room
 
