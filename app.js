@@ -20,6 +20,14 @@
   const AI_TOOLS = ['Wispr Flow', 'Claude', 'Cursor', 'Codex', 'ChatGPT', 'Gemini', 'GitHub Copilot', 'ElevenLabs / TTS', 'Ollama / local models', 'LangChain', 'n8n'];
   const TOPIC_TAGS = ['AI agents', 'Voice AI', 'TTS', 'Model inference', 'Quantization', 'Open source', 'Developer tools', 'Robotics', 'Startups', 'Design'];
   const LOOKING_FOR = ['Build collaborators', 'Co-founders', 'Mentors', 'People to learn from', 'Hiring opportunities', 'People to help'];
+  const LOOKING_FOR_ALIASES = {
+    'Build collaborators': ['collaborator', 'collaborators', 'co-build', 'build together', 'build with someone', 'people to build with', 'teammate', 'teammates'],
+    'Co-founders': ['co-founder', 'cofounder', 'co founder', 'founding partner'],
+    'Mentors': ['mentor', 'mentorship', 'guidance'],
+    'People to learn from': ['learn from', 'learn alongside', 'people to learn from'],
+    'Hiring opportunities': ['hiring', 'job opportunity', 'job opportunities', 'looking for a job', 'looking to hire'],
+    'People to help': ['help others', 'help people', 'people to help', 'support others', 'contribute back']
+  };
   const TOOL_ALIASES = {
     'Wispr Flow': ['wispr flow', 'whisper flow'],
     'Claude': ['claude'],
@@ -42,7 +50,7 @@
     'Open source': ['open source', 'open-source'],
     'Developer tools': ['developer tools', 'devtools', 'coding tools'],
     'Robotics': ['robotics', 'robot'],
-    'Startups': ['startup', 'startups', 'founder'],
+    'Startups': ['startup', 'startups', 'founding a company'],
     'Design': ['design', 'designer', 'product design']
   };
   let activeRoom = null;
@@ -173,16 +181,21 @@
       return [{ value: tool, group }];
     });
     const includesAlias = (alias) => normalized.includes(alias.replace(/[’']/g, '').toLowerCase());
+    const sentences = normalized.split(/[.!?;\n]+/).filter(Boolean);
     return {
       tools,
-      topics: TOPIC_TAGS.filter((topic) => TOPIC_ALIASES[topic].some(includesAlias))
+      topics: TOPIC_TAGS.filter((topic) => TOPIC_ALIASES[topic].some(includesAlias)),
+      goals: LOOKING_FOR.filter((goal) => sentences.some((sentence) =>
+        LOOKING_FOR_ALIASES[goal].some((alias) => sentence.includes(alias))
+        && /\b(looking|want|would love|hope|hoping|need|find|seeking|searching|open to|happy to)\b/.test(sentence)
+      ))
     };
   }
 
   function showProfileSetup(roomCode = invitedRoomCode(), profile = readDraft() || {}) {
     const source = profile || {};
     const draft = roomCode && roomCode !== activeRoom?.code ? { ...source, share_with_room: false } : source;
-    const appliedSignals = new Set();
+    const autoSelectedSignals = new Set();
     const selectedTools = asTags(draft.tools_used).filter((tool) => AI_TOOLS.includes(tool));
     const customTools = asTags(draft.tools_used).filter((tool) => !AI_TOOLS.includes(tool)).join(', ');
     const selectedTopics = draft.interests || [];
@@ -194,7 +207,7 @@
       <form id="profile-form">
         <label class="field"><span>DISPLAY NAME</span><input id="profile-name" maxlength="32" placeholder="Name or nickname" autocomplete="nickname" required value="${escapeHtml(draft.name || '')}" /></label>
         <label class="field"><span>YOUR BUILDER INTRO</span><textarea id="profile-bio" maxlength="260" placeholder="I’m building… I’m curious about… I’d love to meet…" required>${escapeHtml(draft.bio || '')}</textarea></label>
-        <div class="voice-tip"><span>🎙️</span><div><b>Speak with Wispr Flow</b><small>Focus the intro box, start Flow, and speak naturally. SideQuest will suggest tool and topic tags from the text for you to review.</small></div></div>
+        <div class="voice-tip"><span>🎙️</span><div><b>Speak with Wispr Flow</b><small>Focus the intro box, start Flow, and speak naturally. SideQuest will suggest tool, interest, and “who to meet” tags from what you say.</small></div></div>
         <div class="detected-note" id="detected-note" aria-live="polite">Your name stays a separate field so you can choose exactly how it appears.</div>
         <fieldset class="profile-fieldset"><legend>AI TOOLS I USE</legend>${profileChoiceButtons('tools_used', AI_TOOLS, selectedTools)}<label class="field compact-field"><span>OTHER TOOLS I USE</span><input id="profile-custom-tools" maxlength="180" placeholder="Comma-separated tool names" value="${escapeHtml(customTools)}" /></label></fieldset>
         <fieldset class="profile-fieldset"><legend>TOOLS I’M CURIOUS ABOUT · SAY IT IN YOUR INTRO</legend><div class="voice-curious-preview" id="voice-curious-preview" aria-live="polite">Say “I’m curious about Cursor and Claude” in your intro and they’ll appear here.</div></fieldset>
@@ -216,16 +229,27 @@
       const signals = profileSignals(bioField.value);
       const suggestions = [
         ...signals.tools.map(({ value, group }) => [group, value]),
-        ...signals.topics.map((value) => ['interests', value])
+        ...signals.topics.map((value) => ['interests', value]),
+        ...signals.goals.map((value) => ['looking_for', value])
       ];
+      const currentKeys = new Set(suggestions.map(([group, value]) => `${group}:${value}`));
+      autoSelectedSignals.forEach((key) => {
+        if (currentKeys.has(key)) return;
+        const [group, value] = key.split(':');
+        const chip = content.querySelector(`[data-choice-group="${group}"][data-value="${CSS.escape(value)}"]`);
+        chip?.setAttribute('aria-pressed', 'false');
+        autoSelectedSignals.delete(key);
+      });
       suggestions.forEach(([group, value]) => {
         const key = `${group}:${value}`;
-        if (appliedSignals.has(key)) return;
+        if (autoSelectedSignals.has(key)) return;
         const chip = content.querySelector(`[data-choice-group="${group}"][data-value="${CSS.escape(value)}"]`);
-        if (chip) chip.setAttribute('aria-pressed', 'true');
-        appliedSignals.add(key);
+        if (chip && chip.getAttribute('aria-pressed') !== 'true') {
+          chip.setAttribute('aria-pressed', 'true');
+          autoSelectedSignals.add(key);
+        }
       });
-      const detected = [...signals.tools.map(({ value }) => value), ...signals.topics];
+      const detected = [...signals.tools.map(({ value }) => value), ...signals.topics, ...signals.goals];
       const curiousToolsFromVoice = signals.tools.filter(({ group }) => group === 'tools_curious').map(({ value }) => value);
       curiousPreview.innerHTML = curiousToolsFromVoice.length
         ? curiousToolsFromVoice.map((tool) => `<span class="voice-curious-tag">${escapeHtml(tool)}</span>`).join('')
