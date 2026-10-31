@@ -12,10 +12,12 @@ SideQuest is a voice-first community for AI builders. Attendees join an event ro
 2. Choose a display name and dictate a builder intro up to 800 characters with Wispr Flow, or type it.
 3. Choose the AI tools you use and interests in the profile form. Say “I’m curious about Cursor and Claude” to fill **Tools I’m curious about**, or “I’d love to meet mentors and collaborators” to auto-select **Who would you like to meet?**. Both update from your intro; you can still tap the meetup-goal options yourself.
 4. Browse builders ranked by shared tools, interests, and goals. Each profile explains the matching signals. Search the room by person, tool, or interest.
-5. Optionally add X or LinkedIn links. They remain private unless the profile owner checks **Show these links to people in this room**.
+5. Optionally add X, LinkedIn, or a public Luma event link. They remain private unless the profile owner checks **Show these links to people in this room**.
 6. Select **Start a game room together** on a match to make a separate room. Copy its invite link to bring the other person in, then play the voice voting game together.
 
 Wispr Flow inserts dictated text into the focused field. SideQuest does not receive audio or control the Flow app. Tool curiosity and meetup-goal suggestions use a built-in keyword list and are not produced by a trained model. The display name is entered separately.
+
+A Luma URL is just an optional event link; adding one does not assert attendance or run Anakin. The planned event-history flow will ask the attendee to review the event and confirm attendance before it can be used for shared-event matching.
 
 ## Matching
 
@@ -45,12 +47,14 @@ In Supabase, enable **Authentication → Sign In / Providers → Allow anonymous
 
 For the connected SideQuest database, the builder-community migration is already applied. For another existing installation, apply [`supabase/migrations/20261031062516_builder_community_profiles.sql`](supabase/migrations/20261031062516_builder_community_profiles.sql) to add matching fields and opt-in social-link storage. The schema migration is also recorded in `supabase/migrations/` for future changes.
 
+The connected database also has the optional Luma URL field. For an existing installation, apply [`supabase/migrations/20261031073723_add_profile_luma_url.sql`](supabase/migrations/20261031073723_add_profile_luma_url.sql).
+
 ## Data and privacy
 
 - Supabase stores the anonymous user ID, room membership, display name, intro, interests, AI tools used or explored, meetup goals, and game votes.
 - This browser keeps a local prefill copy of the profile and last room code, so returning attendees don’t have to enter them again. Joining a room still writes the profile to Supabase so other room members can discover it; clearing browser storage removes the local prefill.
-- Social URLs are stored in a separate table. RLS allows the owner to read them and allows other members of the same room to read them only when `share_with_room` is enabled.
-- No email, Google, X, or LinkedIn account login is required. X and LinkedIn URLs are optional profile fields.
+- X, LinkedIn, and Luma URLs are stored in a separate table. RLS allows the owner to read them and allows other members of the same room to read them only when `share_with_room` is enabled.
+- No email, Google, X, or LinkedIn account login is required. X, LinkedIn, and Luma URLs are optional profile fields.
 - Anonymous identity is tied to the browser session. Clearing site data or changing devices can mean losing access to that profile; a future account-recovery option can be added for a long-term community.
 - Rooms are scoped by code. Shared profile recommendations are based on tags and goals, not GPS or Apple Find My.
 

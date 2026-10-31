@@ -39,6 +39,7 @@ create table if not exists public.profile_social_links (
   user_id uuid not null,
   x_url text check (x_url is null or x_url ~* '^https://(www\.)?(x\.com|twitter\.com)/'),
   linkedin_url text check (linkedin_url is null or linkedin_url ~* '^https://(www\.)?linkedin\.com/'),
+  luma_url text check (luma_url is null or luma_url ~* '^https://(www\.)?(luma\.com|lu\.ma)/[^/?#]+'),
   share_with_room boolean not null default false,
   updated_at timestamptz not null default now(),
   primary key (room_id, user_id),

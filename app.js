@@ -237,7 +237,7 @@
         <fieldset class="profile-fieldset"><legend>TOOLS I’M CURIOUS ABOUT · SAY IT IN YOUR INTRO</legend><div class="voice-curious-preview" id="voice-curious-preview" aria-live="polite">Say “I’m curious about Cursor and Claude” in your intro and they’ll appear here.</div></fieldset>
         <fieldset class="profile-fieldset"><legend>INTERESTS</legend>${profileChoiceButtons('interests', TOPIC_TAGS, selectedTopics)}<label class="field compact-field"><span>ADD YOUR OWN</span><input id="profile-interests" maxlength="180" placeholder="Comma-separated, e.g. film, climate tech" value="${escapeHtml(draft.interestsText || '')}" /></label></fieldset>
         <fieldset class="profile-fieldset"><legend>WHO WOULD YOU LIKE TO MEET?</legend>${profileChoiceButtons('looking_for', LOOKING_FOR, selectedGoals)}</fieldset>
-        <details class="social-details"><summary>Optional social links</summary><label class="field"><span>X PROFILE</span><input id="profile-x" maxlength="180" placeholder="https://x.com/yourhandle" value="${escapeHtml(draft.x_url || '')}" /></label><label class="field"><span>LINKEDIN PROFILE</span><input id="profile-linkedin" maxlength="220" placeholder="https://linkedin.com/in/yourname" value="${escapeHtml(draft.linkedin_url || '')}" /></label><label class="share-toggle"><input id="share-socials" type="checkbox" ${draft.share_with_room ? 'checked' : ''}><span>Show these links to people in this room</span></label><small class="privacy-note">Links stay private unless you turn this on.</small></details>
+        <details class="social-details"><summary>Optional links</summary><label class="field"><span>X PROFILE</span><input id="profile-x" maxlength="180" placeholder="https://x.com/yourhandle" value="${escapeHtml(draft.x_url || '')}" /></label><label class="field"><span>LINKEDIN PROFILE</span><input id="profile-linkedin" maxlength="220" placeholder="https://linkedin.com/in/yourname" value="${escapeHtml(draft.linkedin_url || '')}" /></label><label class="field"><span>LUMA EVENT LINK</span><input id="profile-luma" maxlength="240" placeholder="https://lu.ma/your-event" value="${escapeHtml(draft.luma_url || '')}" /></label><small class="privacy-note">Use a public Luma event link. This does not confirm attendance.</small><label class="share-toggle"><input id="share-socials" type="checkbox" ${draft.share_with_room ? 'checked' : ''}><span>Show these links to people in this room</span></label><small class="privacy-note">Links stay private unless you turn this on.</small></details>
         <div class="error" id="profile-error"></div>
         <button class="button button-lime" type="submit">Continue to the room ↗</button>
         <p class="fine">Your profile is remembered on this browser. No email login needed.</p>
@@ -296,6 +296,7 @@
         looking_for: selectedChoices('looking_for'),
         x_url: content.querySelector('#profile-x').value.trim(),
         linkedin_url: content.querySelector('#profile-linkedin').value.trim(),
+        luma_url: content.querySelector('#profile-luma').value.trim(),
         share_with_room: content.querySelector('#share-socials').checked
       };
       if (!profile.name || !profile.bio) {
@@ -305,6 +306,7 @@
       try {
         profile.x_url = normalizeSocialUrl(profile.x_url, 'x');
         profile.linkedin_url = normalizeSocialUrl(profile.linkedin_url, 'linkedin');
+        profile.luma_url = normalizeSocialUrl(profile.luma_url, 'luma');
       } catch (error) {
         errorBox.textContent = error.message;
         return;
@@ -317,14 +319,18 @@
   function normalizeSocialUrl(value, network) {
     if (!value) return null;
     const base = network === 'x' ? 'https://x.com/' : 'https://www.linkedin.com/in/';
-    const raw = /^[\w.-]+$/.test(value.replace(/^@/, ''))
+    const raw = network !== 'luma' && /^[\w.-]+$/.test(value.replace(/^@/, ''))
       ? `${base}${value.replace(/^@/, '')}`
       : (/^https?:\/\//i.test(value) ? value : `https://${value}`);
+    const label = network === 'x' ? 'X' : network === 'linkedin' ? 'LinkedIn' : 'public Luma event';
     let url;
-    try { url = new URL(raw); } catch { throw new Error(`Enter a valid ${network === 'x' ? 'X' : 'LinkedIn'} profile URL.`); }
+    try { url = new URL(raw); } catch { throw new Error(`Enter a valid ${label} link.`); }
+    if (url.username || url.password) throw new Error('Remove login details from the link.');
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
-    const allowed = network === 'x' ? ['x.com', 'twitter.com'] : ['linkedin.com'];
-    if (url.protocol !== 'https:' || !allowed.includes(host)) throw new Error(`Use a valid HTTPS ${network === 'x' ? 'X' : 'LinkedIn'} profile link.`);
+    const allowed = network === 'x' ? ['x.com', 'twitter.com'] : network === 'linkedin' ? ['linkedin.com'] : ['luma.com', 'lu.ma'];
+    if (url.protocol !== 'https:' || !allowed.includes(host) || (network === 'luma' && url.pathname === '/')) {
+      throw new Error(`Use a valid HTTPS ${label} link.`);
+    }
     return url.toString();
   }
 
@@ -425,10 +431,11 @@
       user_id: userId,
       x_url: profile.x_url || null,
       linkedin_url: profile.linkedin_url || null,
+      luma_url: profile.luma_url || null,
       share_with_room: Boolean(profile.share_with_room),
       updated_at: new Date().toISOString()
     };
-    if (!links.x_url && !links.linkedin_url && !links.share_with_room) {
+    if (!links.x_url && !links.linkedin_url && !links.luma_url && !links.share_with_room) {
       const { error } = await client.from('profile_social_links').delete().eq('room_id', activeRoom.id).eq('user_id', userId);
       if (error) throw error;
       return;
@@ -455,7 +462,7 @@
         .eq('room_id', activeRoom.id)
         .order('updated_at', { ascending: false }),
       client.from('profile_social_links')
-        .select('user_id,x_url,linkedin_url,share_with_room')
+        .select('user_id,x_url,linkedin_url,luma_url,share_with_room')
         .eq('room_id', activeRoom.id)
     ]);
     if (error) throw error;
@@ -554,13 +561,14 @@
       const socials = profile.social_links?.share_with_room ? profile.social_links : null;
       const xUrl = socials && safeSocialHref(socials.x_url, 'x');
       const linkedinUrl = socials && safeSocialHref(socials.linkedin_url, 'linkedin');
+      const lumaUrl = socials && safeSocialHref(socials.luma_url, 'luma');
       const reasons = [
         ...match.sharedTools.map((tool) => `🛠 ${tool}`),
         ...match.sharedInterests.map((interest) => `✳ ${interest}`),
         ...match.sharedGoals.map((goal) => `🤝 ${goal}`)
       ];
       const fit = match.score ? `${reasons.length} SHARED SIGNAL${reasons.length === 1 ? '' : 'S'}` : 'IN YOUR ROOM';
-      const socialMarkup = [xUrl ? `<a href="${escapeHtml(xUrl)}" target="_blank" rel="noopener noreferrer">X ↗</a>` : '', linkedinUrl ? `<a href="${escapeHtml(linkedinUrl)}" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>` : ''].filter(Boolean).join('');
+      const socialMarkup = [xUrl ? `<a href="${escapeHtml(xUrl)}" target="_blank" rel="noopener noreferrer">X ↗</a>` : '', linkedinUrl ? `<a href="${escapeHtml(linkedinUrl)}" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>` : '', lumaUrl ? `<a href="${escapeHtml(lumaUrl)}" target="_blank" rel="noopener noreferrer">Luma event ↗</a>` : ''].filter(Boolean).join('');
       const searchable = [profile.display_name || profile.name, profile.bio, ...tools, ...interests, ...asTags(profile.looking_for)].join(' ').toLowerCase();
       return `<article class="member-card match-card" data-search="${escapeHtml(searchable)}">
         <div class="member-avatar">✦</div>
@@ -581,7 +589,8 @@
       const url = new URL(value);
       if (url.username || url.password) return null;
       const host = url.hostname.toLowerCase().replace(/^www\./, '');
-      const allowed = network === 'x' ? ['x.com', 'twitter.com'] : ['linkedin.com'];
+      const allowed = network === 'x' ? ['x.com', 'twitter.com'] : network === 'linkedin' ? ['linkedin.com'] : ['luma.com', 'lu.ma'];
+      if (network === 'luma' && url.pathname === '/') return null;
       return url.protocol === 'https:' && allowed.includes(host) ? url.toString() : null;
     } catch { return null; }
   }
