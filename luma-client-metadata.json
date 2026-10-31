@@ -1,0 +1,11 @@
+{
+  "client_id": "https://sidequest-meetup.vercel.app/luma-client-metadata.json",
+  "client_name": "SideQuest",
+  "client_uri": "https://sidequest-meetup.vercel.app/",
+  "redirect_uris": [
+    "https://lvnzfqmfdzgjcnzydinx.supabase.co/functions/v1/luma?callback=1"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}
