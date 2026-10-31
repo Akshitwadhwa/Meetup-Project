@@ -37,6 +37,7 @@ Never use an inferred match as proof that someone attended an event. The UI shou
 | SideQuest browser app | Collect event URL, show extraction preview, let the attendee edit and confirm, control room sharing, and display mutual matches. |
 | Supabase Edge Function (`extract-luma-event`) | Require the caller's Supabase user JWT; validate the URL; apply per-user rate limits; call Anakin using a server-side API key; return normalized event details. Do not write a user-confirmed attendance record on the user's behalf. |
 | Anakin URL Scraper | Read the supplied public event page and extract only event metadata. The URL Scraper supports structured extraction; see the [Anakin overview](https://anakin.io/docs/documentation) and [URL Scraper API](https://anakin.io/docs/api-reference/url-scraper). |
+| Optional GenieX client | On supported Qualcomm Snapdragon devices, run a small local model to turn mutually shared event metadata into a natural icebreaker. GenieX is a local inference runtime, not a hosted API; see the [Qualcomm GenieX project](https://github.com/qualcomm/GenieX) and its [platform support guide](https://github.com/qualcomm/GenieX/blob/main/docs/en/get-started/platforms.mdx). |
 | Supabase Postgres | Store user-confirmed event records and room-level sharing choices under RLS. |
 | Optional organizer import | If needed later, a calendar owner can use Luma's official API to import guests for their own authorized calendar. Keep its API key server-side and treat the resulting list as organizer-controlled event data. |
 
@@ -117,8 +118,22 @@ The Edge Function should return useful errors for inaccessible pages, unsupporte
 - Compare only confirmed events that both people chose to share in the same room.
 - Normalize event URLs and compare stable event identity when available; use normalized title plus date as a fallback. Avoid fuzzy title matching that creates surprising false overlaps.
 - Add shared-event overlap as a visible matching reason, e.g. **“1 event in common”**. Keep the score explainable alongside current shared tools, interests, and goals.
-- Generate the first prompt with a small template rather than an LLM: **“You both listed {event title}. What stood out to you?”** This is fast, cheap, and predictable for a live meetup.
+- Generate a basic prompt with a template by default: **“You both listed {event title}. What stood out to you?”** This is fast, cheap, predictable, and works on every device.
 - Show no prompt when there is no confirmed overlap or when either person has not opted to share.
+
+### GenieX use case (optional local-AI enhancement)
+
+Use GenieX to generate a more natural prompt from only the event details both attendees have chosen to share. Example input: event title, date, a short public description, and shared topic tags. Example output: **“You both listed the Gurugram AI Builders meetup. Which talk gave you an idea you want to try?”**
+
+Keep generation short and non-sensitive. The model must not infer a person's identity, personality, attendance, or private interests. Show a **GenieX local** label when its local model generated the prompt; use the template above when GenieX is missing or fails.
+
+GenieX runs on supported Qualcomm Snapdragon devices; it is not a JavaScript library that can simply be added to this static Vercel page. The Qualcomm project documents Windows ARM64, Android, and Linux ARM64 targets. Possible paths:
+
+1. **Best product integration:** build a small Android companion using the GenieX Android SDK for a supported Snapdragon phone. It receives an explicitly shared event-overlap payload and generates the prompt locally.
+2. **Fastest demo:** run GenieX on a supported Snapdragon Windows ARM64 device and generate a prompt in a clearly disclosed demo screen. Keep this isolated from the normal attendee flow until a secure app-to-runtime connection exists.
+3. **Universal fallback:** the main web experience always uses its template when the current device cannot run GenieX.
+
+Do not expose a local GenieX server to the public internet just to connect the hosted site. A local server is suitable for a same-device demo; a production bridge needs a deliberate authenticated design and supported hardware.
 
 ## Build plan
 
@@ -130,6 +145,14 @@ The Edge Function should return useful errors for inaccessible pages, unsupporte
 4. Load only the viewer's private records plus room-shared records permitted by RLS.
 5. Add shared-event match reasons and prompt cards to room discovery.
 6. Update `README.md` with the Function secret and deploy/setup instructions; update this plan as implementation decisions are made.
+
+### Phase 3: GenieX demonstration
+
+1. Confirm access to a supported Snapdragon device and select the Android companion or same-device Windows demo path.
+2. Pick a small instruction-tuned model that fits that device. Pin the tested GenieX and model versions and measure startup time, generation time, and memory on the hardware.
+3. Pass only mutually shared event metadata to local inference. Keep prompt generation on the GenieX device; do not send it to an external LLM.
+4. Label locally generated prompts and retain the template fallback for other devices.
+5. Do not require unsupported devices to install GenieX or block them from matching.
 
 ### Phase 2: organizer-authorized import (optional)
 
@@ -148,6 +171,7 @@ The Edge Function should return useful errors for inaccessible pages, unsupporte
 - The match UI shows shared events only when both records meet those conditions, and the prompt describes the overlap as self-reported.
 - Re-adding the same normalized event URL does not create duplicate event cards.
 - Users can remove an event or turn sharing off; it disappears from other people's match prompts on the next refresh.
+- GenieX generation runs only on supported hardware, uses only mutually shared event data, and has a working non-GenieX fallback.
 
 ## References
 
@@ -156,5 +180,7 @@ The Edge Function should return useful errors for inaccessible pages, unsupporte
 - [Anakin URL Scraper](https://anakin.io/docs/api-reference/url-scraper)
 - [Luma API overview](https://help.luma.com/p/luma-api)
 - [Luma API setup](https://docs.luma.com/reference/getting-started-with-your-api)
+- [Qualcomm GenieX project](https://github.com/qualcomm/GenieX)
+- [GenieX platform support](https://github.com/qualcomm/GenieX/blob/main/docs/en/get-started/platforms.mdx)
 - [Supabase Edge Function security](https://supabase.com/docs/guides/functions/auth)
 - [Supabase API keys and secret handling](https://supabase.com/docs/guides/getting-started/api-keys)
