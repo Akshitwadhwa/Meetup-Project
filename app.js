@@ -516,7 +516,8 @@
     if (eventsError) throw eventsError;
     const linksByUser = Object.fromEntries((socialLinks || []).map((link) => [link.user_id, link]));
     const joinedByUser = Object.fromEntries((memberships || []).map((member) => [member.user_id, member.joined_at]));
-    const eventsByUser = (events || []).filter((item) => item.share_with_room).reduce((groups, item) => { (groups[item.user_id] ||= []).push(item); return groups; }, {});
+    // RLS returns every event to its owner, but only opted-in events from peers.
+    const eventsByUser = (events || []).reduce((groups, item) => { (groups[item.user_id] ||= []).push(item); return groups; }, {});
     return (profiles || []).map((profile) => ({ ...profile, joined_at: joinedByUser[profile.user_id], social_links: linksByUser[profile.user_id] || null, shared_events: eventsByUser[profile.user_id] || [] }))
       .sort((a, b) => new Date(b.joined_at || 0) - new Date(a.joined_at || 0));
   }
