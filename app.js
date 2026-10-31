@@ -4,6 +4,7 @@
   const config = window.SUPABASE_CONFIG || {};
   const configured = Boolean(config.url && config.publishableKey && window.supabase?.createClient);
   const client = configured ? window.supabase.createClient(config.url, config.publishableKey) : null;
+  const BIO_MAX_LENGTH = 800;
   const DRAFT_KEY = 'sidequest-profile-draft';
   const GAME_TITLES = [
     { id: 'interstellar', title: 'Interstellar', year: 2014, art: '🌌', note: 'A love letter across the stars.' },
@@ -206,7 +207,7 @@
       <p>Tell the room what you build, what you’re curious about, and who you’d like to meet.</p>
       <form id="profile-form">
         <label class="field"><span>DISPLAY NAME</span><input id="profile-name" maxlength="32" placeholder="Name or nickname" autocomplete="nickname" required value="${escapeHtml(draft.name || '')}" /></label>
-        <label class="field"><span>YOUR BUILDER INTRO</span><textarea id="profile-bio" maxlength="260" placeholder="I’m building… I’m curious about… I’d love to meet…" required>${escapeHtml(draft.bio || '')}</textarea></label>
+        <label class="field"><span>YOUR BUILDER INTRO · UP TO ${BIO_MAX_LENGTH} CHARACTERS</span><textarea id="profile-bio" maxlength="${BIO_MAX_LENGTH}" placeholder="I’m building… I’m curious about… I’d love to meet…" required>${escapeHtml(draft.bio || '')}</textarea></label>
         <div class="voice-tip"><span>🎙️</span><div><b>Speak with Wispr Flow</b><small>Focus the intro box, start Flow, and speak naturally. SideQuest will suggest tool, interest, and “who to meet” tags from what you say.</small></div></div>
         <div class="detected-note" id="detected-note" aria-live="polite">Your name stays a separate field so you can choose exactly how it appears.</div>
         <fieldset class="profile-fieldset"><legend>AI TOOLS I USE</legend>${profileChoiceButtons('tools_used', AI_TOOLS, selectedTools)}<label class="field compact-field"><span>OTHER TOOLS I USE</span><input id="profile-custom-tools" maxlength="180" placeholder="Comma-separated tool names" value="${escapeHtml(customTools)}" /></label></fieldset>

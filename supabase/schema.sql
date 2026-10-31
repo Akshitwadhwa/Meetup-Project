@@ -22,7 +22,7 @@ create table if not exists public.profiles (
   room_id uuid not null references public.rooms(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   display_name text not null check (char_length(display_name) between 1 and 32),
-  bio text not null check (char_length(bio) between 1 and 260),
+  bio text not null check (char_length(bio) between 1 and 800),
   interests text[] not null default '{}',
   tools_used text[] not null default '{}',
   tools_curious text[] not null default '{}',
