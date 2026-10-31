@@ -9,13 +9,13 @@ SideQuest is a voice-first community for AI builders. Attendees join an event ro
 ## Attendee flow
 
 1. Join an event room with its code or invite link. `FLOW26` is the Gurugram meetup room.
-2. Choose a display name, then dictate a short builder intro with Wispr Flow.
-3. Say which AI tools you use, which ones you’re curious about, your interests, and who you hope to meet. SideQuest builds the profile tags live from your spoken intro; you do not need to tap tags or type separate tool and interest fields.
+2. Choose a display name and dictate a short builder intro with Wispr Flow, or type it.
+3. Choose the AI tools you use, interests, and meetup goals in the profile form. For **Tools I’m curious about**, say “I’m curious about Cursor and Claude” in your intro; those tool tags appear automatically without tapping that section’s chips or typing a separate list.
 4. Browse builders ranked by shared tools, interests, and goals. Each profile explains the matching signals. Search the room by person, tool, or interest.
 5. Optionally add X or LinkedIn links. They remain private unless the profile owner checks **Show these links to people in this room**.
 6. Select **Start a game room together** on a match to make a separate room. Copy its invite link to bring the other person in, then play the voice voting game together.
 
-Wispr Flow inserts dictated text into the focused field. SideQuest does not receive audio or control the Flow app. Profile tags are extracted from a built-in keyword list and are not produced by a trained model. The display name is entered separately.
+Wispr Flow inserts dictated text into the focused field. SideQuest does not receive audio or control the Flow app. The curiosity field recognizes known tools from a built-in keyword list and is not produced by a trained model. The display name is entered separately.
 
 ## Matching
 
