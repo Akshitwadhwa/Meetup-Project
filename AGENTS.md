@@ -17,8 +17,8 @@
 - Matching uses shared interests (3 points), AI tools (2), and meetup goals (1), with reasons displayed to the attendee.
 - The optional watchlist game accepts voice-dictated votes or button input and shows shared likes to event participants.
 - X and LinkedIn URLs are optional and shared with event participants only when the profile owner enables sharing.
-- Hosts enter the event and host profile in the Host dashboard. Attendees do not edit host fields or connect personal Luma accounts.
-- Anakin reads only the host-supplied public Luma event page to summarize event details. Its API key and host dashboard code stay in Supabase Function secrets. See `ANAKIN.md` for integration and privacy details.
+- Hosts enter the event and host profile in the Host dashboard. Attendees do not edit host fields.
+- Attendees do not connect their own Luma accounts or paste Luma links into profiles. The event host submits the public Luma URL and manages the host profile in the Host dashboard. Anakin summarizes that public page for the event listing. Its API key and host dashboard code stay in Supabase Function secrets. See `ANAKIN.md` for integration and privacy details.
 
 ## Supabase and privacy
 
