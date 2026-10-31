@@ -48,6 +48,7 @@ For the connected SideQuest database, the builder-community migration is already
 ## Data and privacy
 
 - Supabase stores the anonymous user ID, room membership, display name, intro, interests, AI tools used or explored, meetup goals, and game votes.
+- This browser keeps a local prefill copy of the profile and last room code, so returning attendees don’t have to enter them again. Joining a room still writes the profile to Supabase so other room members can discover it; clearing browser storage removes the local prefill.
 - Social URLs are stored in a separate table. RLS allows the owner to read them and allows other members of the same room to read them only when `share_with_room` is enabled.
 - No email, Google, X, or LinkedIn account login is required. X and LinkedIn URLs are optional profile fields.
 - Anonymous identity is tied to the browser session. Clearing site data or changing devices can mean losing access to that profile; a future account-recovery option can be added for a long-term community.

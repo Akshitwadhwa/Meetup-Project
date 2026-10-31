@@ -6,6 +6,7 @@
   const client = configured ? window.supabase.createClient(config.url, config.publishableKey) : null;
   const BIO_MAX_LENGTH = 800;
   const DRAFT_KEY = 'sidequest-profile-draft';
+  const LAST_ROOM_KEY = 'sidequest-last-room-code';
   const GAME_TITLES = [
     { id: 'interstellar', title: 'Interstellar', year: 2014, art: '🌌', note: 'A love letter across the stars.' },
     { id: 'inception', title: 'Inception', year: 2010, art: '🌀', note: 'Dreams inside dreams. Follow the spinning top.' },
@@ -144,7 +145,29 @@
   }
 
   function readDraft() {
-    try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null'); }
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch { /* Continue with the session copy when persistent storage is unavailable. */ }
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null');
+      if (saved) saveDraft(saved);
+      return saved;
+    } catch { return null; }
+  }
+
+  function saveDraft(profile) {
+    const saved = JSON.stringify(profile);
+    try { localStorage.setItem(DRAFT_KEY, saved); } catch { /* Browser storage can be unavailable in private mode. */ }
+    try { sessionStorage.setItem(DRAFT_KEY, saved); } catch { /* Keep the local copy when possible. */ }
+  }
+
+  function rememberRoomCode(code) {
+    try { localStorage.setItem(LAST_ROOM_KEY, code); } catch { /* Room code can still be entered manually. */ }
+  }
+
+  function lastRoomCode() {
+    try { return localStorage.getItem(LAST_ROOM_KEY); }
     catch { return null; }
   }
 
@@ -217,7 +240,7 @@
         <details class="social-details"><summary>Optional social links</summary><label class="field"><span>X PROFILE</span><input id="profile-x" maxlength="180" placeholder="https://x.com/yourhandle" value="${escapeHtml(draft.x_url || '')}" /></label><label class="field"><span>LINKEDIN PROFILE</span><input id="profile-linkedin" maxlength="220" placeholder="https://linkedin.com/in/yourname" value="${escapeHtml(draft.linkedin_url || '')}" /></label><label class="share-toggle"><input id="share-socials" type="checkbox" ${draft.share_with_room ? 'checked' : ''}><span>Show these links to people in this room</span></label><small class="privacy-note">Links stay private unless you turn this on.</small></details>
         <div class="error" id="profile-error"></div>
         <button class="button button-lime" type="submit">Continue to the room ↗</button>
-        <p class="fine">No email or Google login required.</p>
+        <p class="fine">Your profile is remembered on this browser. No email login needed.</p>
       </form>`;
     bindClose();
     content.querySelectorAll('[data-choice-group]').forEach((button) => button.addEventListener('click', () => {
@@ -286,8 +309,8 @@
         errorBox.textContent = error.message;
         return;
       }
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(profile));
-      showRoomEntry(profile, roomCode);
+      saveDraft(profile);
+      showRoomEntry(profile, roomCode || invitedRoomCode() || lastRoomCode());
     });
   }
 
@@ -305,7 +328,7 @@
     return url.toString();
   }
 
-  function showRoomEntry(profile = readDraft() || {}, roomCode = null) {
+  function showRoomEntry(profile = readDraft() || {}, roomCode = invitedRoomCode() || lastRoomCode()) {
     content.innerHTML = `<button class="close" aria-label="Close">×</button>
       <div class="joined"><div class="big-emoji">🪩</div>
       <div class="mono modal-kicker">PROFILE READY · STEP 2 OF 2</div>
@@ -353,10 +376,14 @@
         if (error) throw error;
         activeRoom = data?.[0];
         if (!activeRoom) throw new Error('Room code not found or the room is closed.');
+        rememberRoomCode(activeRoom.code);
+        saveDraft(profile);
         await saveProfile(profile);
       } else {
         if (code !== 'FLOW26') throw new Error('That code didn’t open this demo room. Try FLOW26.');
         activeRoom = { id: 'local-demo', code: 'FLOW26', name: 'Gurugram AI Builders' };
+        rememberRoomCode(activeRoom.code);
+        saveDraft(profile);
         const members = JSON.parse(localStorage.getItem('sidequest-members') || '[]');
         const next = { ...profile, display_name: profile.name, at: Date.now() };
         members.push(next);
@@ -386,6 +413,7 @@
       updated_at: new Date().toISOString()
     }, { onConflict: 'room_id,user_id' });
     if (error) throw error;
+    saveDraft(profile);
     activeProfile = { ...profile, display_name: profile.name, user_id: userData.user.id };
     await saveProfileSocialLinks(profile, userData.user.id);
     await showRoomBoard(profile.name);
