@@ -17,7 +17,7 @@
     { id: 'succession', title: 'Succession', year: 2018, art: '🏢', note: 'Rich family. Zero chill.' },
     { id: 'dune-part-two', title: 'Dune: Part Two', year: 2024, art: '🏜️', note: 'Destiny looks good in the desert.' }
   ];
-  const AI_TOOLS = ['Wispr Flow', 'Claude', 'Cursor', 'Codex', 'ChatGPT', 'Gemini', 'GitHub Copilot', 'ElevenLabs / TTS', 'Ollama / local models', 'LangChain', 'n8n'];
+  const AI_TOOLS = ['Wispr Flow', 'Claude', 'Cursor', 'Codex', 'ChatGPT', 'Gemini', 'GitHub Copilot', 'ElevenLabs / TTS', 'Ollama / local models', 'LangChain', 'n8n', 'Perplexity', 'Grok', 'Windsurf', 'Lovable', 'Replit', 'v0', 'Devin'];
   const TOPIC_TAGS = ['AI agents', 'Voice AI', 'TTS', 'Model inference', 'Quantization', 'Open source', 'Developer tools', 'Robotics', 'Startups', 'Design'];
   const LOOKING_FOR = ['Build collaborators', 'Co-founders', 'Mentors', 'People to learn from', 'Hiring opportunities', 'People to help'];
   const TOOL_ALIASES = {
@@ -31,7 +31,14 @@
     'ElevenLabs / TTS': ['elevenlabs', 'text to speech', 'tts'],
     'Ollama / local models': ['ollama', 'local model', 'local models'],
     'LangChain': ['langchain'],
-    'n8n': ['n8n']
+    'n8n': ['n8n'],
+    'Perplexity': ['perplexity'],
+    'Grok': ['grok'],
+    'Windsurf': ['windsurf'],
+    'Lovable': ['lovable'],
+    'Replit': ['replit'],
+    'v0': ['v0'],
+    'Devin': ['devin']
   };
   const TOPIC_ALIASES = {
     'AI agents': ['agent', 'agents', 'tool calling'],
@@ -143,14 +150,6 @@
     return new URLSearchParams(location.search).get('room');
   }
 
-  function profileChoiceButtons(group, options, selected = []) {
-    return `<div class="choice-chips">${options.map((value) => `<button type="button" class="choice-chip" data-choice-group="${group}" data-value="${escapeHtml(value)}" aria-pressed="${selected.includes(value)}">${escapeHtml(value)}</button>`).join('')}</div>`;
-  }
-
-  function selectedChoices(group) {
-    return [...content.querySelectorAll(`[data-choice-group="${group}"][aria-pressed="true"]`)].map((button) => button.dataset.value);
-  }
-
   function uniqueTags(values) {
     return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(0, 12);
   }
@@ -163,73 +162,77 @@
 
   function profileSignals(text) {
     const normalized = text.toLowerCase().replace(/[’']/g, '').replace(/\s+/g, ' ');
-    const tools = AI_TOOLS.flatMap((tool) => {
-      const alias = TOOL_ALIASES[tool].find((candidate) => normalized.includes(candidate.replace(/[’']/g, '').toLowerCase()));
-      if (!alias) return [];
-      const term = alias.replace(/[’']/g, '').toLowerCase();
-      const position = normalized.indexOf(term);
-      const context = normalized.slice(Math.max(0, position - 48), position + term.length + 32);
-      const group = /(want to try|curious about|interested in|like to try|learn about|exploring|hoping to try)/.test(context) ? 'tools_curious' : 'tools_used';
-      return [{ value: tool, group }];
-    });
+    const sentences = normalized.split(/[.!?;\n]+/).filter(Boolean);
+    const tools = { used: [], curious: [] };
+    AI_TOOLS.forEach((tool) => sentences.forEach((sentence) => {
+      const position = TOOL_ALIASES[tool].map((alias) => {
+        const escaped = alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const match = new RegExp(`(^|\\W)${escaped}(?=$|\\W)`, 'i').exec(sentence);
+        return match ? match.index + match[1].length : -1;
+      }).find((index) => index >= 0);
+      if (position == null || position < 0) return;
+      const beforeTool = sentence.slice(0, position);
+      const intents = [...beforeTool.matchAll(/\b(cur(?:ious|iosity)|want to try|like to try|hope to try|hoping to try|want to learn|learn about|learning about|exploring|interested in using|would like to explore|keen to try|excited to try|use|using|work with|build with|tried)\b/g)];
+      const latestIntent = intents.at(-1)?.[1] || '';
+      tools[/cur|try|learn|explor|interested|keen|excited/.test(latestIntent) ? 'curious' : 'used'].push(tool);
+    }));
     const includesAlias = (alias) => normalized.includes(alias.replace(/[’']/g, '').toLowerCase());
     return {
-      tools,
-      topics: TOPIC_TAGS.filter((topic) => TOPIC_ALIASES[topic].some(includesAlias))
+      tools_used: uniqueTags(tools.used),
+      tools_curious: uniqueTags(tools.curious),
+      topics: TOPIC_TAGS.filter((topic) => TOPIC_ALIASES[topic].some(includesAlias)),
+      looking_for: LOOKING_FOR.filter((goal) => {
+        const expressions = {
+          'Build collaborators': /collaborator|co-builder|build together|people to build with/,
+          'Co-founders': /co-founder|cofounder|co founder/,
+          'Mentors': /mentor|guidance/,
+          'People to learn from': /learn from|people to learn/,
+          'Hiring opportunities': /hiring|job opportunities|looking for a job/,
+          'People to help': /people to help|helping others|looking to help/
+        };
+        return expressions[goal].test(normalized);
+      })
     };
   }
 
   function showProfileSetup(roomCode = invitedRoomCode(), profile = readDraft() || {}) {
     const source = profile || {};
     const draft = roomCode && roomCode !== activeRoom?.code ? { ...source, share_with_room: false } : source;
-    const appliedSignals = new Set();
-    const selectedTools = asTags(draft.tools_used).filter((tool) => AI_TOOLS.includes(tool));
-    const curiousTools = asTags(draft.tools_curious).filter((tool) => AI_TOOLS.includes(tool));
-    const customTools = asTags(draft.tools_used).filter((tool) => !AI_TOOLS.includes(tool)).join(', ');
-    const customCuriousTools = asTags(draft.tools_curious).filter((tool) => !AI_TOOLS.includes(tool)).join(', ');
-    const selectedTopics = draft.interests || [];
-    const selectedGoals = draft.looking_for || [];
     content.innerHTML = `<button class="close" aria-label="Close">×</button>
       <div class="mono modal-kicker">YOUR BUILDER CARD · STEP 1</div>
       <h2 id="modal-title">Make your<br>builder profile.</h2>
       <p>Tell the room what you build, what you’re curious about, and who you’d like to meet.</p>
       <form id="profile-form">
         <label class="field"><span>DISPLAY NAME</span><input id="profile-name" maxlength="32" placeholder="Name or nickname" autocomplete="nickname" required value="${escapeHtml(draft.name || '')}" /></label>
-        <label class="field"><span>YOUR BUILDER INTRO</span><textarea id="profile-bio" maxlength="260" placeholder="I’m building… I’m curious about… I’d love to meet…" required>${escapeHtml(draft.bio || '')}</textarea></label>
-        <div class="voice-tip"><span>🎙️</span><div><b>Speak with Wispr Flow</b><small>Focus the intro box, start Flow, and speak naturally. SideQuest will suggest tool and topic tags from the text for you to review.</small></div></div>
-        <div class="detected-note" id="detected-note" aria-live="polite">Your name stays a separate field so you can choose exactly how it appears.</div>
-        <fieldset class="profile-fieldset"><legend>AI TOOLS I USE</legend>${profileChoiceButtons('tools_used', AI_TOOLS, selectedTools)}<label class="field compact-field"><span>OTHER TOOLS I USE</span><input id="profile-custom-tools" maxlength="180" placeholder="Comma-separated tool names" value="${escapeHtml(customTools)}" /></label></fieldset>
-        <fieldset class="profile-fieldset"><legend>TOOLS I’M CURIOUS ABOUT</legend>${profileChoiceButtons('tools_curious', AI_TOOLS, curiousTools)}<label class="field compact-field"><span>OTHER TOOLS TO TRY</span><input id="profile-custom-curious" maxlength="180" placeholder="Comma-separated tool names" value="${escapeHtml(customCuriousTools)}" /></label></fieldset>
-        <fieldset class="profile-fieldset"><legend>INTERESTS</legend>${profileChoiceButtons('interests', TOPIC_TAGS, selectedTopics)}<label class="field compact-field"><span>ADD YOUR OWN</span><input id="profile-interests" maxlength="180" placeholder="Comma-separated, e.g. film, climate tech" value="${escapeHtml(draft.interestsText || '')}" /></label></fieldset>
-        <fieldset class="profile-fieldset"><legend>WHO WOULD YOU LIKE TO MEET?</legend>${profileChoiceButtons('looking_for', LOOKING_FOR, selectedGoals)}</fieldset>
+        <label class="field"><span>YOUR BUILDER INTRO · SPEAK NATURALLY</span><textarea id="profile-bio" maxlength="260" placeholder="I use Claude and Cursor. I’m curious about Codex and Windsurf. I’m interested in voice AI and model inference. I’d love to meet collaborators and mentors." required>${escapeHtml(draft.bio || '')}</textarea></label>
+        <div class="voice-tip"><span>🎙️</span><div><b>Say it with Wispr Flow</b><small>Start Flow once, then speak what you use, what you’re curious about, your interests, and who you’d like to meet. Your voice fills this intro; SideQuest sorts the signals automatically—no tag tapping or extra typing.</small></div></div>
+        <div class="detected-note" id="detected-note" aria-live="polite">Speak a short intro and your builder card will fill in here.</div>
+        <div class="spoken-signals" id="spoken-signals" aria-live="polite"></div>
         <details class="social-details"><summary>Optional social links</summary><label class="field"><span>X PROFILE</span><input id="profile-x" maxlength="180" placeholder="https://x.com/yourhandle" value="${escapeHtml(draft.x_url || '')}" /></label><label class="field"><span>LINKEDIN PROFILE</span><input id="profile-linkedin" maxlength="220" placeholder="https://linkedin.com/in/yourname" value="${escapeHtml(draft.linkedin_url || '')}" /></label><label class="share-toggle"><input id="share-socials" type="checkbox" ${draft.share_with_room ? 'checked' : ''}><span>Show these links to people in this room</span></label><small class="privacy-note">Links stay private unless you turn this on.</small></details>
         <div class="error" id="profile-error"></div>
         <button class="button button-lime" type="submit">Continue to the room ↗</button>
         <p class="fine">No email or Google login required.</p>
       </form>`;
     bindClose();
-    content.querySelectorAll('[data-choice-group]').forEach((button) => button.addEventListener('click', () => {
-      button.setAttribute('aria-pressed', button.getAttribute('aria-pressed') !== 'true');
-    }));
     const bioField = content.querySelector('#profile-bio');
     const detectedNote = content.querySelector('#detected-note');
+    const spokenSignals = content.querySelector('#spoken-signals');
+    let currentSignals = profileSignals(bioField.value);
     bioField.addEventListener('input', () => {
-      const signals = profileSignals(bioField.value);
-      const suggestions = [
-        ...signals.tools.map(({ value, group }) => [group, value]),
-        ...signals.topics.map((value) => ['interests', value])
+      currentSignals = profileSignals(bioField.value);
+      const groups = [
+        ['TOOLS I USE', currentSignals.tools_used],
+        ['TOOLS I’M CURIOUS ABOUT', currentSignals.tools_curious],
+        ['INTERESTS', currentSignals.topics],
+        ['I’D LIKE TO MEET', currentSignals.looking_for]
       ];
-      suggestions.forEach(([group, value]) => {
-        const key = `${group}:${value}`;
-        if (appliedSignals.has(key)) return;
-        const chip = content.querySelector(`[data-choice-group="${group}"][data-value="${CSS.escape(value)}"]`);
-        if (chip) chip.setAttribute('aria-pressed', 'true');
-        appliedSignals.add(key);
-      });
-      const detected = [...signals.tools.map(({ value }) => value), ...signals.topics];
-      detectedNote.textContent = detected.length
-        ? `Picked up ${detected.join(', ')} from your intro. Review the selected tags below.`
-        : 'Your name stays a separate field so you can choose exactly how it appears.';
+      const populated = groups.filter(([, values]) => values.length);
+      detectedNote.textContent = populated.length
+        ? 'Builder card updated from your spoken intro. Keep talking to add or change what you want.'
+        : 'Speak a short intro and your builder card will fill in here.';
+      spokenSignals.innerHTML = populated.length
+        ? populated.map(([label, values]) => `<section class="spoken-signal-group"><b>${label}</b><div class="spoken-signal-tags">${values.map((value) => `<span class="spoken-signal-tag">${escapeHtml(value)}</span>`).join('')}</div></section>`).join('')
+        : '<p class="spoken-empty">Your tools, interests, and people you hope to meet will appear here.</p>';
     });
     bioField.dispatchEvent(new Event('input'));
     content.querySelector('#profile-form').addEventListener('submit', (event) => {
@@ -238,11 +241,10 @@
       const profile = {
         name: content.querySelector('#profile-name').value.trim(),
         bio: bioField.value.trim(),
-        interests: uniqueTags([...selectedChoices('interests'), ...content.querySelector('#profile-interests').value.split(',')]),
-        interestsText: content.querySelector('#profile-interests').value.trim(),
-        tools_used: uniqueTags([...selectedChoices('tools_used'), ...content.querySelector('#profile-custom-tools').value.split(',')]),
-        tools_curious: uniqueTags([...selectedChoices('tools_curious'), ...content.querySelector('#profile-custom-curious').value.split(',')]),
-        looking_for: selectedChoices('looking_for'),
+        interests: currentSignals.topics,
+        tools_used: currentSignals.tools_used,
+        tools_curious: currentSignals.tools_curious,
+        looking_for: currentSignals.looking_for,
         x_url: content.querySelector('#profile-x').value.trim(),
         linkedin_url: content.querySelector('#profile-linkedin').value.trim(),
         share_with_room: content.querySelector('#share-socials').checked
