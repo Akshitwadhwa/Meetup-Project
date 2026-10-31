@@ -6,7 +6,6 @@
   const client = configured ? window.supabase.createClient(config.url, config.publishableKey) : null;
   const BIO_MAX_LENGTH = 800;
   const DRAFT_KEY = 'sidequest-profile-draft';
-  const LAST_ROOM_KEY = 'sidequest-last-room-code';
   const GAME_TITLES = [
     { id: 'interstellar', title: 'Interstellar', year: 2014, art: '🌌', note: 'A love letter across the stars.' },
     { id: 'inception', title: 'Inception', year: 2010, art: '🌀', note: 'Dreams inside dreams. Follow the spinning top.' },
@@ -56,89 +55,155 @@
     'Design': ['design', 'designer', 'product design']
   };
   let activeRoom = null;
+  let activeEvent = null;
   let activeProfile = null;
-  let returnRoom = null;
   let activeGameName = '';
   let gameIndex = 0;
   let gameVotes = {};
   let refreshTimer = null;
 
   document.querySelectorAll('[data-open]').forEach((button) => button.addEventListener('click', openModal));
-  document.querySelectorAll('[data-create-room]').forEach((button) => button.addEventListener('click', openCreateRoom));
+  document.querySelectorAll('[data-host-admin]').forEach((button) => button.addEventListener('click', openHostDashboard));
+  const questTabs = [...document.querySelectorAll('.quest-tab')];
+  questTabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => setQuest(index));
+    tab.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? questTabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : questTabs.length - 1)) % questTabs.length;
+      setQuest(next);
+      questTabs[next].focus();
+    });
+  });
   modal.addEventListener('click', (event) => { if (event.target === modal) closeModal(); });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closeModal(); });
-  resumeLumaReturn();
-
   function openModal() {
-    showProfileSetup();
+    showEventDirectory();
     modal.classList.add('open');
-    setTimeout(() => document.querySelector('#profile-name')?.focus(), 100);
+    setTimeout(() => content.querySelector('#event-search')?.focus(), 100);
+  }
+
+  function setQuest(index) {
+    const main = index === 0;
+    questTabs.forEach((tab, tabIndex) => {
+      tab.setAttribute('aria-selected', String(tabIndex === index));
+      tab.tabIndex = tabIndex === index ? 0 : -1;
+    });
+    document.querySelector('#quest-title').innerHTML = main
+      ? 'Show up for<br>the <span class="h-script">Main Quest.</span>'
+      : 'Meet your<br>next favorite <span class="h-script">person.</span>';
+    document.querySelector('#quest-copy').textContent = main
+      ? 'Build something real at the hackathon. Find the people who make it better.'
+      : 'Find builders who share your AI tools, curious rabbit holes, and things you want to build.';
+    document.querySelector('#quest-caption').textContent = main
+      ? 'The event host publishes the Luma event and host profile. Anakin adds public event context; attendees choose the event by name.'
+      : 'Make a voice-built profile, discover shared tools and interests, then start a conversation or play the group game.';
+    document.querySelector('#quest-caption').setAttribute('aria-labelledby', main ? 'main-quest-tab' : 'side-quest-tab');
+    document.querySelector('#quest-note').textContent = main
+      ? 'Your event history is private. People who join the same event can discover your builder profile.'
+      : 'No email needed. Your builder profile is tied to an anonymous account.';
+  }
+
+  async function showEventDirectory(message = '') {
+    modal.classList.add('open');
+    if (!client) {
+      renderEventDirectory([], 'Connect SideQuest to Supabase to load the host-created event list.');
+      return;
+    }
+    renderEventDirectory([], message || 'Loading events…');
+    try {
+      await ensureAnonymousUser();
+      const { data, error } = await client.from('hosted_events')
+        .select('id,event_name,event_location,starts_at,luma_url,event_summary,organizer_name,host_name,host_bio,host_x_url,host_linkedin_url')
+        .eq('is_published', true)
+        .order('starts_at', { ascending: true });
+      if (error) throw error;
+      renderEventDirectory(data || [], '');
+      const inviteId = new URLSearchParams(location.search).get('event');
+      const invited = (data || []).find((event) => event.id === inviteId);
+      if (invited) selectHostedEvent(invited);
+    } catch (error) {
+      renderEventDirectory([], friendlyError(error));
+    }
+  }
+
+  function renderEventDirectory(events, message = '') {
+    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="mono modal-kicker">THE EVENT BOARD · PICK YOUR QUEST</div><h2 id="modal-title">Which event are you at?</h2><p>Choose the event by name. Its host and Luma details are set by the event host.</p>
+      <label class="match-search"><span class="sr-only">Search events</span><input id="event-search" type="search" placeholder="Search event name or venue" autocomplete="off"></label>
+      <div class="error" id="event-error">${escapeHtml(message)}</div>
+      <div class="event-directory">${events.map((event) => `<article class="event-option" data-event-search="${escapeHtml(`${event.event_name} ${event.event_location} ${event.host_name}`.toLowerCase())}"><div class="mono">${event.starts_at ? escapeHtml(new Date(event.starts_at).toLocaleString()) : 'UPCOMING EVENT'}</div><h3>${escapeHtml(event.event_name)}</h3><p class="event-location">📍 ${escapeHtml(event.event_location)}</p>${event.event_summary ? `<p>${escapeHtml(event.event_summary)}</p>` : ''}<p class="fine event-host">Hosted by ${escapeHtml(event.host_name)}${event.organizer_name ? ` · ${escapeHtml(event.organizer_name)}` : ''}</p><button class="button button-lime" type="button" data-join-event="${escapeHtml(event.id)}">Join this event ↗</button></article>`).join('') || (!message || message === 'Loading events…' ? '<p class="fine">No events are open yet. The host dashboard can publish the first one.</p>' : '')}</div>
+      <button type="button" class="edit-profile" data-host-admin>Host dashboard</button>`;
+    bindClose();
+    content.querySelector('[data-host-admin]')?.addEventListener('click', openHostDashboard);
+    content.querySelectorAll('[data-join-event]').forEach((button) => button.addEventListener('click', () => {
+      const selected = events.find((event) => event.id === button.dataset.joinEvent);
+      if (selected) selectHostedEvent(selected);
+    }));
+    content.querySelector('#event-search')?.addEventListener('input', (event) => {
+      const term = event.currentTarget.value.trim().toLowerCase();
+      content.querySelectorAll('.event-option').forEach((card) => { card.hidden = !card.dataset.eventSearch.includes(term); });
+    });
+  }
+
+  function selectHostedEvent(event) {
+    activeEvent = event;
+    showProfileSetup(null, readDraft() || {});
+    modal.classList.add('open');
+  }
+
+  function openHostDashboard() {
+    if (!client) {
+      content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="mono modal-kicker">HOST ADMIN</div><h2 id="modal-title">Connect Supabase first.</h2><p>The host dashboard needs Supabase for event records, plus the Anakin and host access secrets in Edge Function settings.</p><button class="button button-lime" id="host-back">Back to the event list</button>`;
+      bindClose();
+      content.querySelector('#host-back').addEventListener('click', () => showEventDirectory());
+      return;
+    }
+    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="mono modal-kicker">HOST ADMIN · CREATE AN OFFICIAL EVENT</div><h2 id="modal-title">Put your event on the map.</h2><p>Add the Luma event link and the host details. Anakin will read the public event page and fill in the event brief before it appears in the attendee event list.</p>
+      <form id="host-event-form"><label class="field"><span>HOST DASHBOARD CODE</span><input id="host-code" type="password" autocomplete="off" required placeholder="Admin access code"></label><label class="field"><span>EVENT NAME</span><input id="host-event-name" maxlength="180" required placeholder="Speed of Thought" /></label><label class="field"><span>VENUE / LOCATION</span><input id="host-event-location" maxlength="180" required placeholder="91Springboard, Gurugram" /></label><label class="field"><span>DATE & TIME</span><input id="host-event-start" type="datetime-local" /></label><label class="field"><span>PUBLIC LUMA EVENT LINK</span><input id="host-event-luma" type="url" required placeholder="https://lu.ma/your-event" /></label><fieldset class="profile-fieldset"><legend>HOST PROFILE · MANAGED HERE BY THE HOST</legend><label class="field"><span>HOST NAME</span><input id="host-name" maxlength="80" required placeholder="Your name" /></label><label class="field"><span>HOST INTRO</span><textarea id="host-bio" maxlength="800" required placeholder="Who are you, and what should attendees know about you?"></textarea></label><label class="field"><span>HOST X · OPTIONAL</span><input id="host-x" maxlength="180" placeholder="@handle or X profile URL" /></label><label class="field"><span>HOST LINKEDIN · OPTIONAL</span><input id="host-linkedin" maxlength="220" placeholder="LinkedIn profile URL" /></label></fieldset><div id="host-event-status" class="error" aria-live="polite"></div><button class="button button-lime" type="submit">Scrape with Anakin & publish event ✨</button><button class="edit-profile" type="button" id="back-to-events">Back to event list</button></form>`;
+    bindClose();
+    content.querySelector('#back-to-events').addEventListener('click', () => showEventDirectory());
+    content.querySelector('#host-event-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const button = form.querySelector('[type="submit"]');
+      const status = content.querySelector('#host-event-status');
+      button.disabled = true; button.textContent = 'Anakin is reading the Luma page…';
+      status.textContent = '';
+      try {
+        await ensureAnonymousUser();
+        const eventDetails = {
+          eventName: content.querySelector('#host-event-name').value.trim(),
+          location: content.querySelector('#host-event-location').value.trim(),
+          startsAt: content.querySelector('#host-event-start').value ? new Date(content.querySelector('#host-event-start').value).toISOString() : null,
+          lumaUrl: content.querySelector('#host-event-luma').value.trim(),
+          hostName: content.querySelector('#host-name').value.trim(),
+          hostBio: content.querySelector('#host-bio').value.trim(),
+          hostX: content.querySelector('#host-x').value.trim(),
+          hostLinkedIn: content.querySelector('#host-linkedin').value.trim()
+        };
+        const { data, error } = await client.functions.invoke('events', { body: { action: 'create', adminCode: content.querySelector('#host-code').value, event: eventDetails } });
+        if (error) throw new Error(data?.error || error.message || 'Could not publish this event.');
+        if (data?.error) throw new Error(data.error);
+        activeEvent = data.event;
+        renderPublishedEvent(data.event);
+      } catch (error) {
+        status.textContent = friendlyError(error);
+        button.disabled = false; button.textContent = 'Scrape with Anakin & publish event ✨';
+      }
+    });
+  }
+
+  function renderPublishedEvent(event) {
+    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="joined"><div class="big-emoji">✨</div><div class="mono modal-kicker">EVENT PUBLISHED</div><h2 id="modal-title">${escapeHtml(event.event_name)}</h2><p>${escapeHtml(event.event_location)}${event.starts_at ? ` · ${escapeHtml(new Date(event.starts_at).toLocaleString())}` : ''}</p><div class="event-brief"><b>${escapeHtml(event.organizer_name || event.host_name)}</b><p>${escapeHtml(event.event_summary || 'Open the Luma event page for details.')}</p></div><p>Your event is now available by name in the attendee event list. Event joiners will see the host profile and discover one another in this event.</p><button class="button button-lime" id="admin-new-event">Create another event</button><button class="edit-profile" id="admin-event-list">View attendee event list</button></div>`;
+    bindClose();
+    content.querySelector('#admin-new-event').addEventListener('click', openHostDashboard);
+    content.querySelector('#admin-event-list').addEventListener('click', () => showEventDirectory());
   }
 
   function closeModal() {
     modal.classList.remove('open');
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = null;
-  }
-
-  async function openCreateRoom(event) {
-    event?.preventDefault();
-    modal.classList.add('open');
-    if (!client) {
-      showCreateRoomNotice('Room creation needs Supabase', 'Connect the Supabase project and enable anonymous sign-ins to create a shared room code.');
-      return;
-    }
-    showCreateRoomForm();
-  }
-
-  function showCreateRoomNotice(title, message) {
-    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="mono modal-kicker">MAKE A ROOM ✳</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p><button class="button button-lime" id="try-room-again">Got it</button>`;
-    bindClose();
-    content.querySelector('#try-room-again').addEventListener('click', closeModal);
-  }
-
-  function showCreateRoomForm() {
-    content.innerHTML = `<button class="close" aria-label="Close">×</button>
-      <div class="mono modal-kicker">MAKE A ROOM · OPEN TO EVERYONE</div>
-      <h2>Start a room.</h2><p>Choose a name and get a shareable code. Anyone can make a room; share the code with your people.</p>
-      <form id="create-room-form"><label class="field"><span>ROOM NAME</span><input id="room-name" maxlength="60" placeholder="Gurugram AI Builders" required /></label>
-        <div class="error" id="create-error"></div><button class="button button-lime" type="submit">Generate room code ✳</button></form><p class="fine">Room creation is limited to 3 per account each hour to prevent spam.</p>`;
-    bindClose();
-    content.querySelector('#create-room-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const button = event.currentTarget.querySelector('button[type="submit"]');
-      const errorBox = content.querySelector('#create-error');
-      const roomName = content.querySelector('#room-name').value.trim();
-      button.disabled = true;
-      button.textContent = 'Making your room…';
-      try {
-        await ensureAnonymousUser();
-        const { data, error } = await client.rpc('create_room', { p_name: roomName });
-        if (error) throw error;
-        const room = data?.[0];
-        if (!room) throw new Error('Could not create the room. Try again.');
-        showCreatedRoom(room);
-      } catch (error) {
-        showMessage(errorBox, friendlyError(error));
-        button.disabled = false;
-        button.textContent = 'Try again ↗';
-      }
-    });
-  }
-
-  function showCreatedRoom(room) {
-    content.innerHTML = `<button class="close" aria-label="Close">×</button>
-      <div class="joined"><div class="big-emoji">🔑</div><div class="mono modal-kicker">ROOM READY TO SHARE</div>
-      <h2 id="modal-title">${escapeHtml(room.name)}</h2><p>Share this code with everyone you want in the room.</p>
-      <div class="room-code host-code">${escapeHtml(room.code)}</div>
-      <button class="button button-lime" id="copy-room-code">Copy room code ↗</button>
-      <button class="edit-profile" id="join-created-room">Join this room and make my profile</button></div>`;
-    bindClose();
-    content.querySelector('#copy-room-code').addEventListener('click', async (event) => {
-      try { await navigator.clipboard.writeText(room.code); event.currentTarget.textContent = 'Copied ✓'; }
-      catch { event.currentTarget.textContent = `Room code: ${room.code}`; }
-    });
-    content.querySelector('#join-created-room').addEventListener('click', () => showProfileSetup(room.code));
   }
 
   function bindClose() {
@@ -161,19 +226,6 @@
     const saved = JSON.stringify(profile);
     try { localStorage.setItem(DRAFT_KEY, saved); } catch { /* Browser storage can be unavailable in private mode. */ }
     try { sessionStorage.setItem(DRAFT_KEY, saved); } catch { /* Keep the local copy when possible. */ }
-  }
-
-  function rememberRoomCode(code) {
-    try { localStorage.setItem(LAST_ROOM_KEY, code); } catch { /* Room code can still be entered manually. */ }
-  }
-
-  function lastRoomCode() {
-    try { return localStorage.getItem(LAST_ROOM_KEY); }
-    catch { return null; }
-  }
-
-  function invitedRoomCode() {
-    return new URLSearchParams(location.search).get('room');
   }
 
   function profileChoiceButtons(group, options, selected = []) {
@@ -217,18 +269,20 @@
     };
   }
 
-  function showProfileSetup(roomCode = invitedRoomCode(), profile = readDraft() || {}) {
+  function showProfileSetup(_unused, profile = readDraft() || {}) {
+    if (!activeEvent) { showEventDirectory('Choose an event before making your builder profile.'); return; }
     const source = profile || {};
-    const draft = roomCode && roomCode !== activeRoom?.code ? { ...source, share_with_room: false } : source;
+    const draft = source;
     const autoSelectedSignals = new Set();
     const selectedTools = asTags(draft.tools_used).filter((tool) => AI_TOOLS.includes(tool));
     const customTools = asTags(draft.tools_used).filter((tool) => !AI_TOOLS.includes(tool)).join(', ');
     const selectedTopics = draft.interests || [];
     const selectedGoals = draft.looking_for || [];
     content.innerHTML = `<button class="close" aria-label="Close">×</button>
-      <div class="mono modal-kicker">YOUR BUILDER CARD · STEP 1</div>
-      <h2 id="modal-title">Make your<br>builder profile.</h2>
-      <p>Tell the room what you build, what you’re curious about, and who you’d like to meet.</p>
+      <div class="mono modal-kicker">JOIN EVENT · BUILDER PROFILE</div>
+      <h2 id="modal-title">Meet the people at<br>${escapeHtml(activeEvent.event_name)}.</h2>
+      <div class="selected-event-summary"><b>${escapeHtml(activeEvent.event_location)}</b>${activeEvent.starts_at ? `<span>${escapeHtml(new Date(activeEvent.starts_at).toLocaleString())}</span>` : ''}<p>${escapeHtml(activeEvent.event_summary || 'Your event host will share more about this event.')}</p><button type="button" class="edit-profile" id="change-event">Choose a different event</button></div>
+      <p>Tell the people at this event what you build, what you’re curious about, and who you’d like to meet.</p>
       <form id="profile-form">
         <label class="field"><span>DISPLAY NAME</span><input id="profile-name" maxlength="32" placeholder="Name or nickname" autocomplete="nickname" required value="${escapeHtml(draft.name || '')}" /></label>
         <label class="field"><span>YOUR BUILDER INTRO · UP TO ${BIO_MAX_LENGTH} CHARACTERS</span><textarea id="profile-bio" maxlength="${BIO_MAX_LENGTH}" placeholder="I’m building… I’m curious about… I’d love to meet…" required>${escapeHtml(draft.bio || '')}</textarea></label>
@@ -238,12 +292,13 @@
         <fieldset class="profile-fieldset"><legend>TOOLS I’M CURIOUS ABOUT · SAY IT IN YOUR INTRO</legend><div class="voice-curious-preview" id="voice-curious-preview" aria-live="polite">Say “I’m curious about Cursor and Claude” in your intro and they’ll appear here.</div></fieldset>
         <fieldset class="profile-fieldset"><legend>INTERESTS</legend>${profileChoiceButtons('interests', TOPIC_TAGS, selectedTopics)}<label class="field compact-field"><span>ADD YOUR OWN</span><input id="profile-interests" maxlength="180" placeholder="Comma-separated, e.g. film, climate tech" value="${escapeHtml(draft.interestsText || '')}" /></label></fieldset>
         <fieldset class="profile-fieldset"><legend>WHO WOULD YOU LIKE TO MEET?</legend>${profileChoiceButtons('looking_for', LOOKING_FOR, selectedGoals)}</fieldset>
-        <details class="social-details"><summary>Optional links</summary><label class="field"><span>X PROFILE</span><input id="profile-x" maxlength="180" placeholder="https://x.com/yourhandle" value="${escapeHtml(draft.x_url || '')}" /></label><label class="field"><span>LINKEDIN PROFILE</span><input id="profile-linkedin" maxlength="220" placeholder="https://linkedin.com/in/yourname" value="${escapeHtml(draft.linkedin_url || '')}" /></label><label class="field"><span>LUMA EVENT LINK</span><input id="profile-luma" maxlength="240" placeholder="https://lu.ma/your-event" value="${escapeHtml(draft.luma_url || '')}" /></label><small class="privacy-note">Use a public Luma event link. This does not confirm attendance.</small><label class="share-toggle"><input id="share-socials" type="checkbox" ${draft.share_with_room ? 'checked' : ''}><span>Show these links to people in this room</span></label><small class="privacy-note">Links stay private unless you turn this on.</small></details>
+        <details class="social-details"><summary>Optional links</summary><label class="field"><span>X PROFILE</span><input id="profile-x" maxlength="180" placeholder="https://x.com/yourhandle" value="${escapeHtml(draft.x_url || '')}" /></label><label class="field"><span>LINKEDIN PROFILE</span><input id="profile-linkedin" maxlength="220" placeholder="https://linkedin.com/in/yourname" value="${escapeHtml(draft.linkedin_url || '')}" /></label><label class="share-toggle"><input id="share-socials" type="checkbox" ${draft.share_with_room ? 'checked' : ''}><span>Show these links to people at this event</span></label><small class="privacy-note">Links stay private unless you turn this on.</small></details>
         <div class="error" id="profile-error"></div>
-        <button class="button button-lime" type="submit">Continue to the room ↗</button>
+        <button class="button button-lime" type="submit">Join this event ↗</button>
         <p class="fine">Your profile is remembered on this browser. No email login needed.</p>
       </form>`;
     bindClose();
+    content.querySelector('#change-event').addEventListener('click', () => showEventDirectory());
     content.querySelectorAll('[data-choice-group]').forEach((button) => button.addEventListener('click', () => {
       button.setAttribute('aria-pressed', button.getAttribute('aria-pressed') !== 'true');
     }));
@@ -297,7 +352,6 @@
         looking_for: selectedChoices('looking_for'),
         x_url: content.querySelector('#profile-x').value.trim(),
         linkedin_url: content.querySelector('#profile-linkedin').value.trim(),
-        luma_url: content.querySelector('#profile-luma').value.trim(),
         share_with_room: content.querySelector('#share-socials').checked
       };
       if (!profile.name || !profile.bio) {
@@ -307,52 +361,31 @@
       try {
         profile.x_url = normalizeSocialUrl(profile.x_url, 'x');
         profile.linkedin_url = normalizeSocialUrl(profile.linkedin_url, 'linkedin');
-        profile.luma_url = normalizeSocialUrl(profile.luma_url, 'luma');
       } catch (error) {
         errorBox.textContent = error.message;
         return;
       }
       saveDraft(profile);
-      showRoomEntry(profile, roomCode || invitedRoomCode() || lastRoomCode());
+      joinSelectedEvent(profile);
     });
   }
 
   function normalizeSocialUrl(value, network) {
     if (!value) return null;
     const base = network === 'x' ? 'https://x.com/' : 'https://www.linkedin.com/in/';
-    const raw = network !== 'luma' && /^[\w.-]+$/.test(value.replace(/^@/, ''))
+    const raw = /^[\w.-]+$/.test(value.replace(/^@/, ''))
       ? `${base}${value.replace(/^@/, '')}`
       : (/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const label = network === 'x' ? 'X' : network === 'linkedin' ? 'LinkedIn' : 'public Luma event';
+    const label = network === 'x' ? 'X' : 'LinkedIn';
     let url;
     try { url = new URL(raw); } catch { throw new Error(`Enter a valid ${label} link.`); }
     if (url.username || url.password) throw new Error('Remove login details from the link.');
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
-    const allowed = network === 'x' ? ['x.com', 'twitter.com'] : network === 'linkedin' ? ['linkedin.com'] : ['luma.com', 'lu.ma'];
-    if (url.protocol !== 'https:' || !allowed.includes(host) || (network === 'luma' && url.pathname === '/')) {
+    const allowed = network === 'x' ? ['x.com', 'twitter.com'] : ['linkedin.com'];
+    if (url.protocol !== 'https:' || !allowed.includes(host)) {
       throw new Error(`Use a valid HTTPS ${label} link.`);
     }
     return url.toString();
-  }
-
-  function showRoomEntry(profile = readDraft() || {}, roomCode = invitedRoomCode() || lastRoomCode()) {
-    content.innerHTML = `<button class="close" aria-label="Close">×</button>
-      <div class="joined"><div class="big-emoji">🪩</div>
-      <div class="mono modal-kicker">PROFILE READY · STEP 2 OF 2</div>
-      <h2 id="modal-title">Nice to meet you, ${escapeHtml(profile.name || 'friend')}.</h2>
-      <p>Your builder card is ready. Enter the room code to find people with shared interests and tools.</p>
-      <div class="profile-preview"><b>${escapeHtml(profile.name || '')}</b><span>${escapeHtml(profile.bio || '')}</span><div class="taglist">${[...(profile.tools_used || []), ...(profile.interests || [])].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div></div>
-      <button class="edit-profile" type="button">← Edit my intro</button>
-      <form id="join-form">
-        <label class="field"><span>ROOM CODE</span><input id="code" autocomplete="off" placeholder="e.g. FLOW26" maxlength="12" required value="${escapeHtml(roomCode || '')}" /></label>
-        <div class="error" id="room-error"></div>
-        <button class="button button-lime" type="submit">Join the room ↗</button>
-        <p class="fine">Your profile is saved to the shared room after you join.</p>
-      </form></div>`;
-    bindClose();
-    content.querySelector('.edit-profile').addEventListener('click', () => showProfileSetup(roomCode, profile));
-    content.querySelector('#join-form').addEventListener('submit', joinRoom);
-    setTimeout(() => content.querySelector('#code')?.focus(), 50);
   }
 
   async function ensureAnonymousUser() {
@@ -364,44 +397,30 @@
     return data.user;
   }
 
-  async function joinRoom(event) {
-    event.preventDefault();
-    const code = content.querySelector('#code').value.trim().toUpperCase();
-    const errorBox = content.querySelector('#room-error');
-    const profile = readDraft();
-    if (!profile?.name || !profile?.bio) {
-      showProfileSetup();
+  async function joinSelectedEvent(profile) {
+    const submit = content.querySelector('#profile-form [type="submit"]');
+    const errorBox = content.querySelector('#profile-error');
+    if (!activeEvent || !client) {
+      showMessage(errorBox, 'Choose a published event and connect Supabase to join it.');
       return;
     }
-    const submit = event.currentTarget.querySelector('button[type="submit"]');
     submit.disabled = true;
-    submit.textContent = 'Finding your room…';
+    submit.textContent = 'Joining the event…';
     try {
-      if (client) {
-        await ensureAnonymousUser();
-        const { data, error } = await client.rpc('join_room', { p_code: code });
-        if (error) throw error;
-        activeRoom = data?.[0];
-        if (!activeRoom) throw new Error('Room code not found or the room is closed.');
-        rememberRoomCode(activeRoom.code);
-        saveDraft(profile);
-        await saveProfile(profile);
-      } else {
-        if (code !== 'FLOW26') throw new Error('That code didn’t open this demo room. Try FLOW26.');
-        activeRoom = { id: 'local-demo', code: 'FLOW26', name: 'Gurugram AI Builders' };
-        rememberRoomCode(activeRoom.code);
-        saveDraft(profile);
-        const members = JSON.parse(localStorage.getItem('sidequest-members') || '[]');
-        const next = { ...profile, display_name: profile.name, at: Date.now() };
-        members.push(next);
-        localStorage.setItem('sidequest-members', JSON.stringify(members));
-        activeProfile = next;
-        await showRoomBoard(profile.name, [...members].reverse());
-      }
+      await ensureAnonymousUser();
+      const { data, error } = await client.rpc('join_hosted_event', { p_event_id: activeEvent.id });
+      if (error) throw error;
+      const joinedEvent = data?.[0];
+      if (!joinedEvent) throw new Error('That event is no longer open. Choose another event.');
+      const { data: roomData, error: roomError } = await client.from('rooms').select('id,name').eq('id', joinedEvent.room_id).single();
+      if (roomError) throw roomError;
+      activeRoom = { ...roomData, name: joinedEvent.event_name };
+      saveDraft(profile);
+      await saveProfile(profile);
     } catch (error) {
       showMessage(errorBox, friendlyError(error));
       submit.disabled = false;
-      submit.textContent = 'Join the room ↗';
+      submit.textContent = 'Join this event ↗';
     }
   }
 
@@ -432,11 +451,10 @@
       user_id: userId,
       x_url: profile.x_url || null,
       linkedin_url: profile.linkedin_url || null,
-      luma_url: profile.luma_url || null,
       share_with_room: Boolean(profile.share_with_room),
       updated_at: new Date().toISOString()
     };
-    if (!links.x_url && !links.linkedin_url && !links.luma_url && !links.share_with_room) {
+    if (!links.x_url && !links.linkedin_url && !links.share_with_room) {
       const { error } = await client.from('profile_social_links').delete().eq('room_id', activeRoom.id).eq('user_id', userId);
       if (error) throw error;
       return;
@@ -456,154 +474,51 @@
     if (client) scheduleBoardRefresh(yourName);
   }
 
+  async function showPrivateEventHistory() {
+    try {
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError) throw userError;
+      const { data, error } = await client.from('profile_event_history')
+        .select('event_id,event_name,event_location,joined_at')
+        .eq('user_id', userData.user.id)
+        .order('joined_at', { ascending: false });
+      if (error) throw error;
+      content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="mono modal-kicker">PRIVATE TO YOUR PROFILE</div><h2 id="modal-title">My event history.</h2><p>Only you can see this list. Joining an event connects your builder profile to that event’s people.</p><div class="history-list">${(data || []).map((item) => `<article class="event-option"><h3>${escapeHtml(item.event_name)}</h3><p class="event-location">📍 ${escapeHtml(item.event_location)}</p><small>Joined ${escapeHtml(new Date(item.joined_at).toLocaleString())}</small></article>`).join('') || '<p class="fine">Your event history is empty. Choose an event to add your first one.</p>'}</div><button class="button button-lime" id="history-back">Back to people ↗</button>`;
+      bindClose();
+      content.querySelector('#history-back').addEventListener('click', () => showRoomBoard(activeProfile.name));
+    } catch (error) {
+      const issue = friendlyError(error);
+      renderRoomBoard(activeProfile.name, await loadRoomProfiles());
+      const target = content.querySelector('#discover-error');
+      if (target) target.textContent = `Could not load your private history. ${issue}`;
+    }
+  }
+
   async function loadRoomProfiles() {
-    const [{ data: profiles, error }, { data: socialLinks, error: socialError }, { data: events, error: eventsError }] = await Promise.all([
+    const [{ data: profiles, error }, { data: socialLinks, error: socialError }, { data: memberships, error: memberError }, { data: events, error: eventsError }] = await Promise.all([
       client.from('profiles')
         .select('user_id,display_name,bio,interests,tools_used,tools_curious,looking_for,updated_at')
         .eq('room_id', activeRoom.id)
         .order('updated_at', { ascending: false }),
       client.from('profile_social_links')
-        .select('user_id,x_url,linkedin_url,luma_url,share_with_room')
+        .select('user_id,x_url,linkedin_url,share_with_room')
+        .eq('room_id', activeRoom.id),
+      client.from('room_members')
+        .select('user_id,joined_at')
         .eq('room_id', activeRoom.id),
       client.from('profile_events')
-        .select('user_id,luma_event_id,event_name,event_url,starts_at,organizer_name,event_summary,enrichment_source,share_with_room')
+        .select('user_id,luma_event_id,event_name,event_url,starts_at,organizer_name,event_summary,share_with_room')
         .eq('room_id', activeRoom.id)
     ]);
     if (error) throw error;
     if (socialError) throw socialError;
+    if (memberError) throw memberError;
     if (eventsError) throw eventsError;
     const linksByUser = Object.fromEntries((socialLinks || []).map((link) => [link.user_id, link]));
-    const eventsByUser = (events || []).reduce((groups, event) => {
-      (groups[event.user_id] ||= []).push(event);
-      return groups;
-    }, {});
-    return (profiles || []).map((profile) => ({ ...profile, social_links: linksByUser[profile.user_id] || null, shared_events: eventsByUser[profile.user_id] || [] }));
-  }
-
-  async function callLuma(action, extra = {}) {
-    const { data, error } = await client.functions.invoke('luma', { body: { action, ...extra } });
-    if (error) {
-      let details = data;
-      try { if (!details && error.context?.json) details = await error.context.json(); } catch { /* Keep the SDK error if the response is not JSON. */ }
-      throw new Error(details?.error || error.message || 'Luma request failed.');
-    }
-    if (data?.error) throw new Error(data.error);
-    return data;
-  }
-
-  async function openLumaEvents() {
-    if (!client || !activeRoom) return;
-    modal.classList.add('open');
-    renderLumaEvents([], 'Checking your Luma connection…');
-    try {
-      await ensureAnonymousUser();
-      const data = await callLuma('events', { roomCode: activeRoom.code });
-      renderLumaEvents(data.events || []);
-    } catch (error) {
-      renderLumaEvents([], friendlyError(error));
-    }
-  }
-
-  function renderLumaEvents(events, message = '') {
-    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="mono modal-kicker">LUMA + ANAKIN · YOUR EVENTS</div><h2 id="modal-title">Find your event people.</h2><p>Connect your own Luma account and choose events to add to your SideQuest profile. SideQuest does not check or claim that you attended. Anakin reads only each selected public event page to summarize what it’s about and any program details. We never send your Luma profile URL, access token, or private account pages.</p><p class="fine">Luma’s MCP consent may cover capabilities beyond event reading; SideQuest only calls its event-list read tool. Select up to 10 events per import and choose separately which ones this room can see.</p>
-      <div class="error" id="luma-error">${escapeHtml(message)}</div>
-      ${events.length ? `<div class="luma-event-list">${events.map((event, index) => `<div class="luma-event-option"><input type="checkbox" aria-label="Add ${escapeHtml(event.name)} to your builder profile" data-luma-event="${index}"><div><b>${escapeHtml(event.name)}</b><small>${event.startsAt ? escapeHtml(new Date(event.startsAt).toLocaleDateString()) + ' · ' : ''}<a href="${escapeHtml(event.url)}" target="_blank" rel="noopener noreferrer">View on Luma ↗</a></small><label class="luma-share"><input type="checkbox" data-luma-share="${index}"> Share this event with this room</label></div></div>`).join('')}</div><p class="fine">Select events to connect them to your profile. No attendance confirmation is required.</p><button class="button button-lime" id="save-luma-events">Scrape selected links with Anakin & save</button>` : ''}
-      <button class="button button-lime" id="connect-luma">Connect / reconnect Luma ↗</button><button class="edit-profile" id="disconnect-luma">Disconnect Luma</button><button class="edit-profile" id="remove-luma-events">Remove my imported events from this room</button>
-      <p class="fine">Events stay private unless you select them and enable sharing. SideQuest stores event details, not your Luma password or audio.</p>`;
-    bindClose();
-    content.querySelectorAll('[data-luma-event]').forEach((checkbox) => checkbox.addEventListener('change', () => {
-      const selectedCount = content.querySelectorAll('[data-luma-event]:checked').length;
-      if (selectedCount > 10) {
-        checkbox.checked = false;
-        content.querySelector('#luma-error').textContent = 'Anakin can process up to 10 public event links per import.';
-      } else if (selectedCount) content.querySelector('#luma-error').textContent = '';
-    }));
-    content.querySelector('#connect-luma').addEventListener('click', async (event) => {
-      const button = event.currentTarget;
-      button.disabled = true; button.textContent = 'Opening Luma…';
-      try {
-        await ensureAnonymousUser();
-        const result = await callLuma('start', { roomCode: activeRoom.code });
-        location.assign(result.authorizationUrl);
-      } catch (error) {
-        const box = content.querySelector('#luma-error');
-        if (box) box.textContent = friendlyError(error);
-        else renderLumaEvents([], friendlyError(error));
-        button.disabled = false; button.textContent = 'Connect / reconnect Luma ↗';
-      }
-    });
-    content.querySelector('#disconnect-luma').addEventListener('click', async (event) => {
-      event.currentTarget.disabled = true;
-      try {
-        const result = await callLuma('disconnect');
-        renderLumaEvents([], result.lumaRevoked
-          ? 'Luma disconnected and its token revocation was confirmed. Imported event records remain until you remove them from this room.'
-          : 'SideQuest removed its Luma tokens. Luma did not confirm revocation, so also remove SideQuest from your Luma connected apps. Imported events remain until you remove them from this room.');
-      }
-      catch (error) { renderLumaEvents([], friendlyError(error)); }
-    });
-    content.querySelector('#remove-luma-events').addEventListener('click', async (event) => {
-      event.currentTarget.disabled = true;
-      const { error } = await client.from('profile_events').delete().eq('room_id', activeRoom.id).eq('user_id', activeProfile.user_id);
-      if (error) { renderLumaEvents([], friendlyError(error)); return; }
-      renderLumaEvents([], 'Your imported events have been removed from this room.');
-    });
-    content.querySelector('#save-luma-events')?.addEventListener('click', async (event) => {
-      const button = event.currentTarget; button.disabled = true; button.textContent = 'Anakin is reading the event pages…';
-      try {
-        const selected = [...content.querySelectorAll('[data-luma-event]:checked')].map((input) => Number(input.dataset.lumaEvent));
-        if (!selected.length) throw new Error('Select at least one event to add to your profile.');
-        const selectedEvents = selected.map((index) => {
-          const item = events[index];
-          return { id: item.id, url: item.url, name: item.name, startsAt: item.startsAt || null,
-            shareWithRoom: Boolean(content.querySelector(`[data-luma-share="${index}"]`)?.checked) };
-        });
-        const { events: enriched, error: enrichError } = await callLuma('enrich', { roomCode: activeRoom.code, events: selectedEvents });
-        if (enrichError) throw enrichError;
-        const shareById = new Map(selectedEvents.map((event) => [event.id, event.shareWithRoom]));
-        const rows = enriched.map((item) => ({ room_id: activeRoom.id, user_id: activeProfile.user_id, luma_event_id: item.id,
-          event_url: item.url, event_name: item.name, starts_at: item.startsAt || null,
-          organizer_name: item.organizer || null, event_summary: item.summary || null,
-          enrichment_source: item.enrichmentSource || 'anakin_url_scraper',
-          attended_confirmed: false, share_with_room: Boolean(shareById.get(item.id)) }));
-        const { error } = await client.from('profile_events').upsert(rows, { onConflict: 'room_id,user_id,luma_event_id' });
-        if (error) throw error;
-        await showRoomBoard(activeProfile.name);
-      } catch (error) {
-        const box = content.querySelector('#luma-error');
-        if (box) box.textContent = friendlyError(error);
-        button.disabled = false; button.textContent = 'Scrape selected links with Anakin & save';
-      }
-    });
-  }
-
-  async function resumeLumaReturn() {
-    const params = new URLSearchParams(location.search);
-    if (!params.has('luma')) return;
-    const status = params.get('luma');
-    const roomCode = params.get('room');
-    const providerMessage = params.get('message');
-    history.replaceState(null, '', location.pathname + location.hash);
-    modal.classList.add('open');
-    if (status !== 'connected' || !roomCode || !client) {
-      renderLumaEvents([], providerMessage || 'Luma could not connect. Return to your room and try again.');
-      return;
-    }
-    try {
-      const user = await ensureAnonymousUser();
-      const { data, error } = await client.rpc('join_room', { p_code: roomCode });
-      if (error) throw error;
-      activeRoom = data?.[0];
-      if (!activeRoom) throw new Error('That SideQuest room was not found.');
-      const { data: profile, error: profileError } = await client.from('profiles').select('*').eq('room_id', activeRoom.id).eq('user_id', user.id).maybeSingle();
-      if (profileError) throw profileError;
-      if (!profile) throw new Error('Your builder profile was not found in that room. Join it again.');
-      activeProfile = { user_id: user.id, name: profile.display_name, bio: profile.bio, interests: profile.interests, tools_used: profile.tools_used, tools_curious: profile.tools_curious, looking_for: profile.looking_for };
-      await showRoomBoard(activeProfile.name);
-      await openLumaEvents();
-    } catch (error) {
-      renderLumaEvents([], friendlyError(error));
-    }
+    const joinedByUser = Object.fromEntries((memberships || []).map((member) => [member.user_id, member.joined_at]));
+    const eventsByUser = (events || []).filter((item) => item.share_with_room).reduce((groups, item) => { (groups[item.user_id] ||= []).push(item); return groups; }, {});
+    return (profiles || []).map((profile) => ({ ...profile, joined_at: joinedByUser[profile.user_id], social_links: linksByUser[profile.user_id] || null, shared_events: eventsByUser[profile.user_id] || [] }))
+      .sort((a, b) => new Date(b.joined_at || 0) - new Date(a.joined_at || 0));
   }
 
   function scheduleBoardRefresh(yourName) {
@@ -626,36 +541,27 @@
     const myTools = [...(activeProfile?.tools_used || []), ...(activeProfile?.tools_curious || [])];
     content.innerHTML = `<button class="close" aria-label="Close">×</button>
       <div class="joined"><div class="big-emoji">✨</div>
-      <div class="mono modal-kicker">${client ? 'BUILDER COMMUNITY · LIVE ROOM' : 'BUILDER COMMUNITY · LOCAL PREVIEW'}</div>
-      <h2 id="modal-title">Your people are in here, ${escapeHtml(yourName)}.</h2>
-      <p>Meet builders through shared interests, tools, and goals. Matches are based on profile tags, not location tracking.</p>
-      <div class="room-code" id="room-count">${escapeHtml(activeRoom.code)} · ${profiles.length} ${profiles.length === 1 ? 'HUMAN' : 'HUMANS'}</div>
+      <div class="mono modal-kicker">${client ? 'EVENT COMMUNITY · LIVE' : 'EVENT COMMUNITY · LOCAL PREVIEW'}</div>
+      <h2 id="modal-title">You’re at ${escapeHtml(activeEvent?.event_name || activeRoom.name)}, ${escapeHtml(yourName)}.</h2>
+      <p>${escapeHtml(activeEvent?.event_location || '')} · Meet the people who joined this event. The newest arrivals appear first.</p>
+      <div class="event-brief"><b>${escapeHtml(activeEvent?.organizer_name || activeEvent?.host_name || 'Event host')}</b><p>${escapeHtml(activeEvent?.event_summary || '')}</p>${activeEvent?.luma_url ? `<a href="${escapeHtml(activeEvent.luma_url)}" target="_blank" rel="noopener noreferrer">Open the Luma event ↗</a>` : ''}<div class="host-profile"><strong>${escapeHtml(activeEvent?.host_name || '')}</strong><span>${escapeHtml(activeEvent?.host_bio || '')}</span>${activeEvent?.host_x_url ? `<a href="${escapeHtml(activeEvent.host_x_url)}" target="_blank" rel="noopener noreferrer">Host X ↗</a>` : ''}${activeEvent?.host_linkedin_url ? `<a href="${escapeHtml(activeEvent.host_linkedin_url)}" target="_blank" rel="noopener noreferrer">Host LinkedIn ↗</a>` : ''}</div></div>
+      <div class="event-attendee-count" id="room-count">${profiles.length} ${profiles.length === 1 ? 'PERSON' : 'PEOPLE'} CONNECTED TO THIS EVENT</div>
       <div class="my-builder-tags">${[...myTools.map((tool) => `🛠 ${tool}`), ...myInterests].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>
-      <div class="discover-heading"><div><div class="mono">YOUR MATCHES</div><p>Shared signals show why someone may be a good person to meet.</p></div><button type="button" class="edit-profile" id="edit-builder">Edit profile</button></div><label class="match-search"><span class="sr-only">Search builders</span><input id="builder-search" type="search" placeholder="Search people, tools, or interests" autocomplete="off"></label><div class="error" id="discover-error"></div>
-      <div class="member-list">${cards || '<p class="fine">You’re first in this room. Share the invite link and let other builders join.</p>'}</div>
-      <p class="fine">${client ? 'Profiles refresh as people join. Social links appear only when someone chooses to share them with this room.' : 'Local preview only: profiles and matches stay in this browser.'}</p>
-      <button class="button button-lime" id="share-room">Copy room invite link ↗</button>
-      <button class="button button-lime" id="import-luma-events">Connect Luma events ✨</button>
-      ${returnRoom && returnRoom.id !== activeRoom.id ? '<button class="button button-lime" id="back-event">Back to the main event room</button>' : ''}
-      <button class="edit-profile" id="start-game">Optional: play the room voice game 🎙️</button>
-      <button class="button button-lime" id="done">Back to the vibe ↗</button></div>`;
+      <div class="discover-heading"><div><div class="mono">PEOPLE AT THIS EVENT</div><p>Shared tools, interests, and goals help you find the right people to meet.</p></div><button type="button" class="edit-profile" id="edit-builder">Edit profile</button></div><label class="match-search"><span class="sr-only">Search builders</span><input id="builder-search" type="search" placeholder="Search people, tools, or interests" autocomplete="off"></label><div class="error" id="discover-error"></div>
+      <div class="member-list">${cards || '<p class="fine">You are the first person here so far.</p>'}</div>
+      <button class="button button-lime" id="main-quest-events">Main Quest · Explore your Luma events ↗</button><p class="fine">Luma is optional. Event details stay private unless you choose to share each one.</p>
+      <button class="edit-profile" id="my-event-history">My private event history</button><button class="button button-lime" id="share-room">Share this event ↗</button>
+      <button class="edit-profile" id="start-game">Play the event icebreaker 🎙️</button>
+      <button class="button button-lime" id="done">Done ↗</button></div>`;
     bindClose();
-    content.querySelector('#edit-builder').addEventListener('click', () => showProfileSetup(activeRoom.code, activeProfile));
-    content.querySelector('#share-room').addEventListener('click', copyRoomInvite);
-    content.querySelector('#import-luma-events').addEventListener('click', () => openLumaEvents());
+    content.querySelector('#edit-builder').addEventListener('click', () => showProfileSetup(null, activeProfile));
+    content.querySelector('#share-room').addEventListener('click', copyEventInvite);
+    content.querySelector('#my-event-history').addEventListener('click', showPrivateEventHistory);
+    content.querySelector('#main-quest-events').addEventListener('click', () => openLumaEvents());
     content.querySelector('#builder-search').addEventListener('input', (event) => {
       const term = event.currentTarget.value.trim().toLowerCase();
       content.querySelectorAll('.match-card').forEach((card) => { card.hidden = !card.dataset.search.includes(term); });
     });
-    content.querySelector('#back-event')?.addEventListener('click', async () => {
-      activeRoom = returnRoom;
-      returnRoom = null;
-      await showRoomBoard(yourName);
-    });
-    content.querySelectorAll('[data-mini-game]').forEach((button) => button.addEventListener('click', () => {
-      const match = profiles.find((profile) => profile.user_id === button.dataset.miniGame);
-      if (match) createMiniGameRoom(match, button);
-    }));
     content.querySelector('#start-game').addEventListener('click', () => startGame(yourName));
     content.querySelector('#done').addEventListener('click', closeModal);
   }
@@ -695,29 +601,30 @@
     return candidates.map(({ profile, match }) => {
       const interests = asTags(profile.interests);
       const tools = uniqueTags([...asTags(profile.tools_used), ...asTags(profile.tools_curious)]);
+      const sharedEvents = (profile.shared_events || []).filter((item) => (own.shared_events || []).some((mine) => mine.luma_event_id === item.luma_event_id));
       const socials = profile.social_links?.share_with_room ? profile.social_links : null;
-      const commonEvents = (profile.shared_events || []).filter((event) => (own.shared_events || []).some((myEvent) => myEvent.luma_event_id === event.luma_event_id));
       const xUrl = socials && safeSocialHref(socials.x_url, 'x');
       const linkedinUrl = socials && safeSocialHref(socials.linkedin_url, 'linkedin');
-      const lumaUrl = socials && safeSocialHref(socials.luma_url, 'luma');
       const reasons = [
         ...match.sharedTools.map((tool) => `🛠 ${tool}`),
         ...match.sharedInterests.map((interest) => `✳ ${interest}`),
-        ...match.sharedGoals.map((goal) => `🤝 ${goal}`)
+        ...match.sharedGoals.map((goal) => `🤝 ${goal}`),
+        ...sharedEvents.map((item) => `📍 You both listed ${item.event_name}`)
       ];
-      const fit = match.score ? `${reasons.length} SHARED SIGNAL${reasons.length === 1 ? '' : 'S'}` : 'IN YOUR ROOM';
-      const socialMarkup = [xUrl ? `<a href="${escapeHtml(xUrl)}" target="_blank" rel="noopener noreferrer">X ↗</a>` : '', linkedinUrl ? `<a href="${escapeHtml(linkedinUrl)}" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>` : '', lumaUrl ? `<a href="${escapeHtml(lumaUrl)}" target="_blank" rel="noopener noreferrer">Luma event ↗</a>` : ''].filter(Boolean).join('');
+      const fit = (match.score || sharedEvents.length) ? `${reasons.length} SHARED SIGNAL${reasons.length === 1 ? '' : 'S'}` : 'AT THIS EVENT';
+      const socialMarkup = [xUrl ? `<a href="${escapeHtml(xUrl)}" target="_blank" rel="noopener noreferrer">X ↗</a>` : '', linkedinUrl ? `<a href="${escapeHtml(linkedinUrl)}" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>` : ''].filter(Boolean).join('');
       const searchable = [profile.display_name || profile.name, profile.bio, ...tools, ...interests, ...asTags(profile.looking_for)].join(' ').toLowerCase();
       return `<article class="member-card match-card" data-search="${escapeHtml(searchable)}">
         <div class="member-avatar">✦</div>
         <div class="member-info"><div class="match-fit">${fit}</div><div class="member-name">${escapeHtml(profile.display_name || profile.name)}</div>
+        <div class="event-joined-at">Joined ${profile.joined_at ? escapeHtml(new Date(profile.joined_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })) : 'this event'}</div>
         <div class="member-bio">${escapeHtml(profile.bio)}</div>
         ${reasons.length ? `<div class="match-reasons">${reasons.map((reason) => `<span>${escapeHtml(reason)}</span>`).join('')}</div>` : ''}
+        ${sharedEvents.filter((item) => item.event_summary).map((item) => `<div class="shared-event-note">${escapeHtml(item.event_name)} · ${escapeHtml(item.event_summary)}</div>`).join('')}
         <div class="taglist">${[...tools.map((tool) => `🛠 ${tool}`), ...interests].map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</div>
         ${asTags(profile.looking_for).length ? `<div class="looking-for">HOPING TO MEET: ${asTags(profile.looking_for).map(escapeHtml).join(' · ')}</div>` : ''}
-        ${commonEvents.length ? `<div class="match-reasons">${commonEvents.map((event) => `<span>📍 You both listed ${escapeHtml(event.event_name)}${event.organizer_name ? ` · ${escapeHtml(event.organizer_name)}` : ''}</span>`).join('')}</div>${commonEvents.filter((event) => event.event_summary).map((event) => `<div class="shared-event-note">Anakin’s event-page summary: ${escapeHtml(event.event_summary)}</div>`).join('')}` : ''}
         ${socialMarkup ? `<div class="social-links">${socialMarkup}</div>` : ''}
-        ${client && profile.user_id !== activeProfile?.user_id ? `<button type="button" class="match-game-button" data-mini-game="${escapeHtml(profile.user_id)}">Start a game room together ↗</button>` : ''}</div>
+        </div>
       </article>`;
     }).join('');
   }
@@ -728,87 +635,22 @@
       const url = new URL(value);
       if (url.username || url.password) return null;
       const host = url.hostname.toLowerCase().replace(/^www\./, '');
-      const allowed = network === 'x' ? ['x.com', 'twitter.com'] : network === 'linkedin' ? ['linkedin.com'] : ['luma.com', 'lu.ma'];
-      if (network === 'luma' && url.pathname === '/') return null;
+      const allowed = network === 'x' ? ['x.com', 'twitter.com'] : ['linkedin.com'];
       return url.protocol === 'https:' && allowed.includes(host) ? url.toString() : null;
     } catch { return null; }
   }
 
-  async function copyRoomInvite(event) {
+  async function copyEventInvite(event) {
     const invite = new URL(location.href);
-    invite.searchParams.set('room', activeRoom.code);
+    invite.search = '';
+    invite.searchParams.set('event', activeEvent.id);
     invite.hash = 'join';
     try {
       await navigator.clipboard.writeText(invite.toString());
-      event.currentTarget.textContent = 'Invite link copied ✓';
+      event.currentTarget.textContent = 'Event link copied ✓';
     } catch {
-      event.currentTarget.textContent = `Room code: ${activeRoom.code}`;
+      event.currentTarget.textContent = 'Copy this page URL to invite people';
     }
-  }
-
-  async function createMiniGameRoom(match, button) {
-    const eventRoom = activeRoom;
-    const profile = activeProfile;
-    if (!client || !profile) return;
-    button.disabled = true;
-    button.textContent = 'Making your game room…';
-    try {
-      await ensureAnonymousUser();
-      const roomName = `${profile.name} + ${match.display_name} game`.slice(0, 60);
-      const { data: created, error: createError } = await client.rpc('create_room', { p_name: roomName });
-      if (createError) throw createError;
-      const gameRoom = created?.[0];
-      if (!gameRoom) throw new Error('Could not create the mini-room. Try again.');
-      const { data: joined, error: joinError } = await client.rpc('join_room', { p_code: gameRoom.code });
-      if (joinError) throw joinError;
-      const memberRoom = joined?.[0];
-      if (!memberRoom) throw new Error('The game room was created, but could not be joined.');
-      const { data: userData, error: userError } = await client.auth.getUser();
-      if (userError) throw userError;
-      const { error: profileError } = await client.from('profiles').upsert({
-        room_id: memberRoom.id,
-        user_id: userData.user.id,
-        display_name: profile.name,
-        bio: profile.bio,
-        interests: profile.interests || [],
-        tools_used: profile.tools_used || [],
-        tools_curious: profile.tools_curious || [],
-        looking_for: profile.looking_for || [],
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'room_id,user_id' });
-      if (profileError) throw profileError;
-      activeRoom = memberRoom;
-      await saveProfileSocialLinks({ ...profile, share_with_room: false }, userData.user.id);
-      activeRoom = eventRoom;
-      const invite = new URL(location.href);
-      invite.searchParams.set('room', gameRoom.code);
-      invite.hash = 'join';
-      showMiniGameInvite(gameRoom, invite.toString(), match, eventRoom);
-    } catch (error) {
-      activeRoom = eventRoom;
-      button.disabled = false;
-      button.textContent = 'Start a game room together ↗';
-      const message = content.querySelector('#discover-error');
-      if (message) message.textContent = friendlyError(error);
-    }
-  }
-
-  function showMiniGameInvite(room, inviteUrl, match, eventRoom) {
-    content.innerHTML = `<button class="close" aria-label="Close">×</button><div class="joined"><div class="big-emoji">🎮</div><div class="mono modal-kicker">YOUR MINI COMMUNITY IS READY</div><h2 id="modal-title">A room for ${escapeHtml(match.display_name || 'your match')} and you.</h2><p>Share the invite link. They can join this room, then you can play the voice game together.</p><div class="room-code host-code">${escapeHtml(room.code)}</div><button class="button button-lime" id="copy-mini-invite">Copy game invite link ↗</button><button class="button button-lime" id="open-mini-room">Open the mini-room</button><button class="edit-profile" id="return-to-discovery">Back to builder matches</button></div>`;
-    bindClose();
-    content.querySelector('#copy-mini-invite').addEventListener('click', async (event) => {
-      try { await navigator.clipboard.writeText(inviteUrl); event.currentTarget.textContent = 'Game link copied ✓'; }
-      catch { event.currentTarget.textContent = `Room code: ${room.code}`; }
-    });
-    content.querySelector('#open-mini-room').addEventListener('click', async () => {
-      returnRoom = eventRoom;
-      activeRoom = room;
-      await showRoomBoard(activeProfile.name);
-    });
-    content.querySelector('#return-to-discovery').addEventListener('click', async () => {
-      activeRoom = eventRoom;
-      await showRoomBoard(activeProfile.name);
-    });
   }
 
   async function startGame(yourName) {
@@ -824,7 +666,7 @@
       gameVotes.own = Object.fromEntries((ownVotes || []).map((row) => [row.title_id, row.vote]));
       gameIndex = GAME_TITLES.findIndex((title) => !gameVotes.own[title.id]);
     } else {
-      try { gameVotes.own = JSON.parse(localStorage.getItem(`sidequest-votes-${activeRoom.code}`) || '{}'); } catch { gameVotes.own = {}; }
+      try { gameVotes.own = JSON.parse(localStorage.getItem(`sidequest-votes-${activeEvent?.id}`) || '{}'); } catch { gameVotes.own = {}; }
       gameIndex = GAME_TITLES.findIndex((title) => !gameVotes.own[title.id]);
     }
     if (gameIndex < 0) showGameResults(yourName);
@@ -882,7 +724,7 @@
         if (userError) throw userError;
         const { error } = await client.from('game_votes').upsert({ room_id: activeRoom.id, user_id: userData.user.id, title_id: title.id, vote, updated_at: new Date().toISOString() }, { onConflict: 'room_id,user_id,title_id' });
         if (error) throw error;
-      } else localStorage.setItem(`sidequest-votes-${activeRoom.code}`, JSON.stringify(gameVotes.own));
+      } else localStorage.setItem(`sidequest-votes-${activeEvent?.id}`, JSON.stringify(gameVotes.own));
       gameIndex += 1;
       if (gameIndex >= GAME_TITLES.length) showGameResults(activeGameName);
       else renderGameCard();
@@ -928,8 +770,8 @@
     const list = content.querySelector('.member-list');
     const count = content.querySelector('#room-count');
     if (!list || !count) return;
-    list.innerHTML = profileCards(yourName, profiles) || '<p class="fine">You’re the first one here. Invite someone in!</p>';
-    count.textContent = `${activeRoom.code} · ${profiles.length} ${profiles.length === 1 ? 'HUMAN' : 'HUMANS'}`;
+    list.innerHTML = profileCards(yourName, profiles) || '<p class="fine">You are the first person here so far.</p>';
+    count.textContent = `${profiles.length} ${profiles.length === 1 ? 'PERSON' : 'PEOPLE'} CONNECTED TO THIS EVENT`;
   }
 
   function showMessage(error, message) { error.textContent = message; }
@@ -939,8 +781,8 @@
     if (/anonymous_provider_disabled/i.test(message)) return 'Anonymous sign-in is off in this Supabase project. Turn on “Allow anonymous sign-ins” in Auth settings, then try again.';
     if (/Invalid API key|Failed to fetch|NetworkError/i.test(message)) return 'Could not reach Supabase. Check the project URL and publishable key in supabase-config.js.';
     if (/Room creation limit reached/i.test(message)) return 'You have made three rooms in the last hour. Try again later.';
-    if (/Room code not found|room code/i.test(message)) return 'That room code didn’t work. Check the big screen and try again.';
-    if (/function .*create_room|function .*join_room|schema cache/i.test(message)) return 'The SideQuest database setup is not installed yet. Run supabase/schema.sql in the project SQL editor.';
+    if (/event is not available|hosted event|join_hosted_event/i.test(message)) return 'That event is no longer available. Return to the event list and choose another one.';
+    if (/schema cache/i.test(message)) return 'The SideQuest event database migration is not installed yet. Apply the hosted event migration and try again.';
     return message;
   }
 

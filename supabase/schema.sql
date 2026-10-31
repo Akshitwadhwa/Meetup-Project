@@ -191,10 +191,6 @@ $$;
 revoke all on function public.join_room(text) from public, anon;
 grant execute on function public.join_room(text) to authenticated;
 
-insert into public.rooms (code, name)
-values ('FLOW26', 'Gurugram AI Builders')
-on conflict (code) do update set name = excluded.name, is_active = true;
-
 -- Enable profile updates in Supabase Realtime so the room board refreshes live.
 do $$
 begin

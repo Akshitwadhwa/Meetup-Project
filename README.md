@@ -9,7 +9,6 @@ SideQuest helps people connect; it does not manage hackathon projects, track bui
 - **Live site:** https://sidequest-meetup.vercel.app
 - **GitHub:** https://github.com/Akshitwadhwa/Meetup-Project
 - **Stack:** static HTML, CSS, and browser JavaScript with Supabase Auth and Postgres
-- **Event room:** `FLOW26`
 
 ## Main quest: build and submit
 
@@ -24,13 +23,18 @@ SideQuest supports the first step. Keep the build, demo, and submission in the h
 
 ## Side quest: meet your people
 
-1. Join an event room with its code or invite link. `FLOW26` is the Gurugram meetup room.
+1. Choose the event name and venue from the host-published event list. An event invite link opens that event directly; attendees do not enter a room code.
 2. Choose a display name and speak your builder intro into the focused field with Wispr Flow, or type it. Intros can be up to 800 characters.
 3. Review your builder card: tools you use, tools you’re curious about, interests, and who you’d like to meet. SideQuest suggests some tools and meetup goals from the intro so you can review and adjust them.
-4. Find people in the room. Search by name, tool, or interest; matches are ranked using shared tools, interests, and meetup goals, with the shared signals shown on each card.
-5. Optionally add X, LinkedIn, or a public Luma event link. These links are only visible to room members when you enable **Show these links to people in this room**.
-6. Invite a match to a smaller game room. Play the voice-led watchlist icebreaker by saying “like,” “dislike,” or “not seen,” or use the buttons. The room’s shared likes become a group watchlist.
-7. Take the conversation back to the main quest: decide what to build together.
+4. Find people who have joined that event. Search by name, tool, or interest; newest attendees appear first and matches are ranked by shared tools, interests, and meetup goals.
+5. Your event history is private to your profile. The event attendee board is separate: people who join an event can discover other profiles connected to that event.
+6. Optionally add X or LinkedIn links. They are visible to event attendees only when you enable **Show these links to people at this event**.
+7. Play the voice-led watchlist icebreaker with the event community by saying “like,” “dislike,” or “not seen,” or use the buttons.
+8. Take the conversation back to the main quest: decide what to build together.
+
+### Main Quest: event context
+
+The homepage has a keyboard-accessible **Main Quest / Side Quest** switcher. Main Quest is the official event layer: attendees first join the host-published event and create their builder profile; from the joined event board, **Main Quest · Explore your Luma events** opens the existing account-authorized Luma flow. Side Quest continues to be the builder discovery and group icebreaker experience.
 
 ### Voice and Wispr Flow
 
@@ -38,11 +42,9 @@ Wispr Flow dictates into whichever field is focused. SideQuest does not directly
 
 ### Luma events and Anakin summaries
 
-From a room board, choose **Connect Luma events** and connect on Luma’s hosted consent page. SideQuest uses Luma’s account-authorized MCP connection to request the connected user’s own events; a public Luma profile URL is not used as a credential. Choose which events to add to your SideQuest profile—no attendance claim is required—and separately opt to share each one with the room. Shared matches say **“You both listed…”**. Disconnecting removes SideQuest’s stored tokens and requests Luma token revocation; imported room records can be removed separately.
+Hosts open **Host dashboard**, enter the host access code, and submit the event name, venue, date, public Luma URL, and their host profile. The `events` Edge Function checks the host code server-side and uses Anakin to publish public event context. Attendees join by event name; the personal Luma flow is available only after joining.
 
-The OAuth client metadata lives at [`luma-client-metadata.json`](luma-client-metadata.json). Its public URL and callback URI are fixed to the current Vercel and Supabase project. The Edge Function stores tokens in backend-only tables and invokes the Luma event-list tool. Luma’s MCP consent may grant broader MCP access than this read-only app behavior; SideQuest only calls the event-list read tool. See [ANAKIN.md](ANAKIN.md) for the integration boundary and privacy model.
-
-When you select events to add, SideQuest sends only their public Luma event URLs to Anakin’s URL Scraper. It extracts the title, organizer, and a short summary of the event and any listed program details. The result is cached server-side and may be incomplete; the public Luma event page remains the source of truth. Add `ANAKIN_API_KEY` in Supabase **Edge Functions → Secrets**. The key is read only by the `luma` Edge Function and must never be placed in browser code or public Vercel variables.
+Attendees connect their own Luma account through the protected `luma` Edge Function. Luma returns the attendee’s own event list; Anakin reads only selected public event pages and returns the title, date, organizer, and summary for review. Saving is a separate action, as is opting to share each event with the room. A Luma event listing does not prove attendance. Shared matches explain the overlap by event name and public summary. Private event details and Luma credentials are never sent to other attendees. Configure `ANAKIN_API_KEY` in Supabase **Edge Functions → Secrets**; never place it in browser configuration or Git. See [ANAKIN.md](ANAKIN.md) for integration details.
 
 ## Matching
 
@@ -56,39 +58,33 @@ There is no package manager, dependency install, or build step. Start a static s
 python3 -m http.server 8000
 ```
 
-Open <http://localhost:8000>. With the configured Supabase project and anonymous sign-ins enabled, attendees can share rooms and profiles across devices. Without Supabase configuration, the local preview uses browser storage and cannot sync between devices.
+Open <http://localhost:8000>. With the configured Supabase project and anonymous sign-ins enabled, event profiles sync across devices. Without Supabase configuration, the local preview uses browser storage and cannot sync between devices.
 
-To try the room with two people, open the site in two browsers or devices, join the same room code with different profiles, and compare the match ordering. Start a smaller game room from a builder card to share a game invite.
+To try the event flow with two people, first publish an event in the Host dashboard. Open the site in two browsers or devices, choose the same event by name, create different profiles, and compare the event attendee list.
 
 ## Supabase setup
 
 The browser settings live in [`supabase-config.js`](supabase-config.js). The project URL and publishable key are intended for frontend use. Never put a `service_role` key or other secret in the website.
 
-Enable **Authentication → Sign In / Providers → Allow anonymous sign-ins**. For a new database, run these scripts in the Supabase SQL Editor:
+Enable **Authentication → Sign In / Providers → Allow anonymous sign-ins**. For a new database, apply `supabase/schema.sql` and `supabase/game.sql`, followed by `20261031062516_builder_community_profiles.sql`, `20261031071508_allow_longer_builder_intro.sql`, and the two hosted-event migrations (`20261031083609` and `20261031083723`). For attendee-owned Luma event imports, also apply `20261031074940_luma_account_connections.sql`, `20261031081106_add_anakin_event_enrichment.sql`, `20261031081204_tighten_anakin_cache_host_check.sql`, and `20261031081428_allow_event_profile_links_without_attendance_claim.sql`. Existing room IDs remain internal database relationships; attendees select events by name.
 
-1. [`supabase/schema.sql`](supabase/schema.sql) creates event rooms, memberships, builder profiles, optional room-scoped links, RLS policies, the `join_room` function, and the `FLOW26` room.
-2. [`supabase/host_tools.sql`](supabase/host_tools.sql) adds attendee-created rooms. Room creation is limited to three per anonymous account per hour.
-3. [`supabase/game.sql`](supabase/game.sql) creates the shared game-voting table and its RLS policies.
-
-For an existing installation, apply the relevant migrations in [`supabase/migrations/`](supabase/migrations/): the builder-community profile migration adds matching fields and optional link storage, the intro migration permits longer intros, the Luma migration adds the optional event URL, and the Luma and Anakin migrations add connected events and cached event summaries. The connected SideQuest database already has these migrations.
-
-The Luma account connection also needs the `luma_account_connections` migration and the `luma` Edge Function. These are already applied/deployed in the connected Supabase project. If setting up another deployment, run that migration and deploy `supabase/functions/luma/index.ts` with JWT verification disabled at the gateway (the function verifies user JWTs itself; the OAuth callback must be public). Publish `luma-client-metadata.json` at its exact HTTPS URL before testing OAuth. Changing the Vercel domain or Supabase project requires updating both the metadata document and function constants, then redeploying. **The current Vercel project has SSO protection on its `vercel.app` domain**, so outside attendees and Luma cannot use the production OAuth flow until a public custom domain is configured or the owner explicitly changes that protection.
+For an existing installation, apply the hosted-event migrations in [`supabase/migrations/`](supabase/migrations/). Deploy [`supabase/functions/events/index.ts`](supabase/functions/events/index.ts) as the `events` Edge Function with JWT verification enabled. Keep the existing `luma` Edge Function deployed with gateway JWT verification disabled so its OAuth callback can be public; it verifies attendee JWTs itself. The current Luma implementation accepts the joined room ID so no attendee-facing room code is exposed. Configure `EVENT_ADMIN_CODE` and `ANAKIN_API_KEY` in Supabase Edge Function secrets. Keep secrets out of browser config and Git.
 
 ## Data and privacy
 
 - No email, Google, X, or LinkedIn sign-in is required. Supabase anonymous auth provides the browser’s user ID.
-- The browser stores a local prefill copy of the profile and last room code so attendees do not have to re-enter them on the same browser. Clearing browser storage can remove access to that anonymous identity.
-- Supabase stores the anonymous user ID, room membership, display name, intro, interests, AI tools used or explored, meetup goals, and game votes.
-- X, LinkedIn, and Luma URLs are kept in a separate table. Owners can read their own links; other members of the same room can read them only when `share_with_room` is enabled. The same RLS policies apply to the Luma field.
-- Luma access and refresh tokens are stored only in backend-only tables, with no Data API grants for anonymous or signed-in browser roles. Selected event titles, dates, and links are stored per room. The owner can read private selections; room members can read only events explicitly shared by their owner.
+- The browser stores a local prefill copy of the profile so attendees do not have to re-enter it on the same browser. Clearing browser storage can remove access to that anonymous identity.
+- Supabase stores the anonymous user ID, event membership, builder profile, optional X/LinkedIn links, and game votes.
+- The host-published event record contains its Luma link, Anakin event summary, venue/date, and host profile. The attendee's personal event-history table is readable only by that attendee; attendee profiles are visible to other members of the same event.
 - Room recommendations use profile tags and goals. SideQuest does not use GPS or Apple Find My.
 - SideQuest does not store raw voice recordings.
 
 ## Troubleshooting
 
 - **“Anonymous sign-ins are disabled”**: enable anonymous sign-ins in the Supabase project referenced by `supabase-config.js`.
-- **Room join function or base tables missing**: run `supabase/schema.sql`.
-- **Room creation function missing**: run `supabase/host_tools.sql`.
+- **Base tables missing**: apply `supabase/schema.sql`, `supabase/game.sql`, and the migrations in order.
 - **Game voting table missing**: run `supabase/game.sql`.
-- **Builder fields or optional links fail to load**: apply the builder-community and Luma migrations.
-- **Profiles do not match across devices**: confirm both attendees are on the same site, joined the same room code, and have an active network connection.
+- **Builder fields or optional links fail to load**: apply the builder-community migrations.
+- **No event appears**: ask the host to publish it from the Host dashboard and confirm it is marked as published in `hosted_events`.
+- **Host event creation fails**: check `EVENT_ADMIN_CODE`, `ANAKIN_API_KEY`, the `events` Edge Function deployment, and the hosted-event migration.
+- **Profiles do not match across devices**: confirm both attendees selected the same host-published event and have an active network connection.
