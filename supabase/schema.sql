@@ -24,10 +24,25 @@ create table if not exists public.profiles (
   display_name text not null check (char_length(display_name) between 1 and 32),
   bio text not null check (char_length(bio) between 1 and 260),
   interests text[] not null default '{}',
-  social_links jsonb not null default '{}'::jsonb,
+  tools_used text[] not null default '{}',
+  tools_curious text[] not null default '{}',
+  looking_for text[] not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (room_id, user_id)
+);
+
+-- Store optional contact links separately so room-wide profile reads cannot
+-- expose links unless their owner has opted in to sharing them with the room.
+create table if not exists public.profile_social_links (
+  room_id uuid not null,
+  user_id uuid not null,
+  x_url text check (x_url is null or x_url ~* '^https://(www\.)?(x\.com|twitter\.com)/'),
+  linkedin_url text check (linkedin_url is null or linkedin_url ~* '^https://(www\.)?linkedin\.com/'),
+  share_with_room boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (room_id, user_id),
+  foreign key (room_id, user_id) references public.profiles(room_id, user_id) on delete cascade
 );
 
 create index if not exists profiles_room_updated_idx
@@ -38,10 +53,13 @@ create index if not exists room_members_user_idx on public.room_members (user_id
 alter table public.rooms enable row level security;
 alter table public.room_members enable row level security;
 alter table public.profiles enable row level security;
+alter table public.profile_social_links enable row level security;
 
 revoke all on public.rooms, public.room_members, public.profiles from anon, authenticated;
 grant select on public.room_members to authenticated;
 grant select, insert, update, delete on public.profiles to authenticated;
+revoke all on public.profile_social_links from anon, authenticated;
+grant select, insert, update, delete on public.profile_social_links to authenticated;
 
 drop policy if exists "Members can see their own membership" on public.room_members;
 create policy "Members can see their own membership"
@@ -92,6 +110,51 @@ create policy "Users can edit their own room profile"
 drop policy if exists "Users can delete their own room profile" on public.profiles;
 create policy "Users can delete their own room profile"
   on public.profiles for delete to authenticated
+  using (user_id = (select auth.uid()));
+
+drop policy if exists "Owners and opted-in room members can view social links" on public.profile_social_links;
+create policy "Owners and opted-in room members can view social links"
+  on public.profile_social_links for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or (
+      share_with_room
+      and exists (
+        select 1 from public.room_members viewer
+        where viewer.room_id = profile_social_links.room_id
+          and viewer.user_id = (select auth.uid())
+      )
+    )
+  );
+
+drop policy if exists "Users can create their own social links" on public.profile_social_links;
+create policy "Users can create their own social links"
+  on public.profile_social_links for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and exists (
+      select 1 from public.room_members member
+      where member.room_id = profile_social_links.room_id
+        and member.user_id = (select auth.uid())
+    )
+  );
+
+drop policy if exists "Users can update their own social links" on public.profile_social_links;
+create policy "Users can update their own social links"
+  on public.profile_social_links for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (
+    user_id = (select auth.uid())
+    and exists (
+      select 1 from public.room_members member
+      where member.room_id = profile_social_links.room_id
+        and member.user_id = (select auth.uid())
+    )
+  );
+
+drop policy if exists "Users can delete their own social links" on public.profile_social_links;
+create policy "Users can delete their own social links"
+  on public.profile_social_links for delete to authenticated
   using (user_id = (select auth.uid()));
 
 create or replace function public.join_room(p_code text)

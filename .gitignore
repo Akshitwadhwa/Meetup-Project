@@ -1,4 +1,5 @@
 .vercel/
+supabase/.temp/
 .DS_Store
 .env
 .env.*

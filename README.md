@@ -1,71 +1,63 @@
 # SideQuest
 
-SideQuest is a voice-friendly meetup icebreaker. Attendees join a shared room with a code, introduce themselves, and find common ground through a quick movie and TV swipe game.
+SideQuest is a voice-first community for AI builders. Attendees join an event room, create a builder profile, discover people with shared tools and interests, and invite a match to a smaller room for an optional icebreaker game.
 
-- **Live site:** [sidequest-meetup.vercel.app](https://sidequest-meetup.vercel.app)
-- **Hosting:** Vercel (`sidequest-meetup`)
+- **Live site:** https://sidequest-meetup.vercel.app
+- **GitHub:** https://github.com/Akshitwadhwa/Meetup-Project
 - **Stack:** Static HTML, CSS, and JavaScript with Supabase Auth and Postgres
 
-## How to play
+## Attendee flow
 
-1. Open the site and choose **Join a room**. Use the code shown by the organizer; `FLOW26` is the Gurugram meetup room.
-2. Choose a display name and write a short intro. If Wispr Flow is available on your device, use it to dictate directly into the bio field. SideQuest does not call a Wispr Flow API or upload audio.
-3. After joining, you appear on the room board with the other attendees.
-4. Tap **Start the voice game**. Focus the vote field, start Wispr Flow, and say **“like,” “dislike,”** or **“not seen.”** SideQuest saves the vote and advances to the next title. Buttons remain available as a fallback.
-5. When you finish, see which titles are getting shared love in the room. You can play again or return to the board.
+1. Join an event room with its code or invite link. `FLOW26` is the Gurugram meetup room.
+2. Choose a display name and dictate a short builder intro with Wispr Flow, or type it.
+3. SideQuest spots known AI tools and topics in the intro and preselects matching tags. Review or change those tags, add tools you want to try, and choose what kind of people you hope to meet.
+4. Browse builders ranked by shared tools, interests, and goals. Each profile explains the matching signals. Search the room by person, tool, or interest.
+5. Optionally add X or LinkedIn links. They remain private unless the profile owner checks **Show these links to people in this room**.
+6. Select **Start a game room together** on a match to make a separate room. Copy its invite link to bring the other person in, then play the voice voting game together.
 
-The current voice game uses ten titles: *Interstellar*, *Inception*, *The Office*, *Stranger Things*, *Breaking Bad*, *The Bear*, *Black Mirror*, *Sacred Games*, *Succession*, and *Dune: Part Two*. The result list highlights titles liked by at least half the room, with a minimum of two people. Wispr Flow inserts the dictated command into the focused field; the site does not record audio or control the Flow app.
+Wispr Flow inserts dictated text into the focused field. SideQuest does not receive audio or control the Flow app. Profile suggestions use a small built-in keyword list and are not produced by a trained model. The display name is always entered separately and is never guessed from the intro.
 
-## Create and share a room
+## Matching
 
-Anyone can choose **Make a room**, enter a name, and share the generated code. The person who created it joins like any other attendee. Room creation is limited to three rooms per anonymous account per hour to discourage spam.
+The first version uses a simple, explainable score: shared interests count for three points each, shared AI tools for two, and shared meetup goals for one. The UI shows the shared signals rather than presenting the score as an AI prediction. No profile data is used to train a model.
 
 ## Run locally
 
-There is no build step or package install. Start a local static server from this folder:
+There is no build step or package install. Start a static server from this folder:
 
 ```sh
 python3 -m http.server 8000
 ```
 
-Then open [http://localhost:8000](http://localhost:8000). Opening `index.html` directly also shows the site, but a local server is more reliable for browser APIs and Supabase requests.
+Then open http://localhost:8000. For shared rooms and matches, the page needs the configured Supabase project and anonymous sign-ins enabled. The no-config local preview uses browser storage and cannot sync between devices.
 
-To try the shared game with two people, open the live site (or local site) in two separate browsers/devices, join the same room with different display names, and play through the titles on each. Use `FLOW26` for the meetup room or create a separate room for a private test. Each browser gets its own anonymous Supabase user.
+To try it with two people, open the site in two browser profiles or devices, join the same room with different names and profiles, and compare the match ordering. Use **Start a game room together** on a profile to generate a smaller game room and share its invite link.
 
-If Supabase is not configured, the app falls back to a local preview. That preview uses browser storage, so it is not shared between devices; use a configured Supabase project to test real rooms and shared game results.
+## Supabase setup
 
-## Supabase configuration
+The browser client settings are in [`supabase-config.js`](supabase-config.js). The project URL and publishable key are intended for frontend use. Never add a `service_role` key or other secret to the site.
 
-The browser client settings are in [`supabase-config.js`](supabase-config.js). It contains the project URL and a publishable (formerly anon) key. These are intended for browser use; **never put a `service_role` key or other secret in frontend files**.
+In Supabase, enable **Authentication → Sign In / Providers → Allow anonymous sign-ins**. For a new database, run these scripts in the SQL Editor:
 
-For a new Supabase project:
+1. [`supabase/schema.sql`](supabase/schema.sql) creates event rooms, memberships, builder profiles, the room-scoped social-link table, RLS policies, the `join_room` function, and the `FLOW26` room.
+2. [`supabase/host_tools.sql`](supabase/host_tools.sql) adds attendee-created rooms. Room creation is limited to three per anonymous account per hour.
+3. [`supabase/game.sql`](supabase/game.sql) creates the shared game-voting table and its RLS policies.
 
-1. Set its URL and publishable key in `supabase-config.js`.
-2. In **Authentication → Sign In / Providers**, enable **Allow anonymous sign-ins**. SideQuest uses anonymous auth so people can save profiles without email or Google login.
-3. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL Editor. This creates rooms, memberships, profiles, row-level security policies, the `join_room` function, and the `FLOW26` demo room.
-4. Run [`supabase/host_tools.sql`](supabase/host_tools.sql) to enable attendee-created rooms through `create_room`.
-5. Run [`supabase/game.sql`](supabase/game.sql) to create the shared `game_votes` table and its row-level security policies.
-6. Redeploy the static site after changing the config.
-
-The SideQuest Supabase project already has these SQL files applied. If game voting reports that `game_votes` does not exist, run `supabase/game.sql` in that project's SQL Editor and reload the page.
+For the connected SideQuest database, the builder-community migration is already applied. For another existing installation, apply [`supabase/migrations/20261031062516_builder_community_profiles.sql`](supabase/migrations/20261031062516_builder_community_profiles.sql) to add matching fields and opt-in social-link storage. The schema migration is also recorded in `supabase/migrations/` for future changes.
 
 ## Data and privacy
 
-- Supabase stores an anonymous user ID, room membership, display name, bio, interests, and game votes.
-- The first version does not ask for email, Google, X, or LinkedIn details.
-- Room members can see the profiles and game activity for their room. Row-level security limits profile changes and vote edits to the signed-in anonymous user.
-- Anonymous identity is tied to the browser session. Clearing site data or changing devices can lose access to that identity; there is no account recovery until an optional sign-in/linking flow is added.
-- Voice transcription happens through the user's available dictation tool. SideQuest itself only receives the text entered into the profile form.
+- Supabase stores the anonymous user ID, room membership, display name, intro, interests, AI tools used or explored, meetup goals, and game votes.
+- Social URLs are stored in a separate table. RLS allows the owner to read them and allows other members of the same room to read them only when `share_with_room` is enabled.
+- No email, Google, X, or LinkedIn account login is required. X and LinkedIn URLs are optional profile fields.
+- Anonymous identity is tied to the browser session. Clearing site data or changing devices can mean losing access to that profile; a future account-recovery option can be added for a long-term community.
+- Rooms are scoped by code. Shared profile recommendations are based on tags and goals, not GPS or Apple Find My.
 
-## Crowd behavior and troubleshooting
+## Troubleshooting
 
-The room board refreshes periodically (about every 12–18 seconds) so attendees can see new profiles. The current board does not keep a Realtime WebSocket open for every guest. Game votes are saved in Supabase as each person plays and are fetched for the result screen.
-
-- **“Anonymous sign-ins are disabled”**: check that anonymous sign-in is enabled in the Auth settings of the exact Supabase project referenced by `supabase-config.js`.
-- **Room code not found**: confirm the code, and make sure the room is active in the same Supabase project configured by the site.
+- **“Anonymous sign-ins are disabled”**: enable anonymous sign-ins in the Supabase project referenced by `supabase-config.js`.
+- **Room join function or base tables missing**: run `supabase/schema.sql`.
 - **Room creation function missing**: run `supabase/host_tools.sql`.
-- **Room join function or tables missing**: run `supabase/schema.sql`.
 - **Game voting table missing**: run `supabase/game.sql`.
-- **Profiles or votes are not shared**: check that both devices use the same live site/config and have successfully joined the same room.
-
-For a large event, review Supabase Auth rate limits ahead of time: anonymous sign-in limits can matter when many attendees share venue Wi-Fi. Consider enabling CAPTCHA/bot protection and adjusting limits in the Supabase dashboard for the expected attendance.
+- **Builder fields or social links fail to load**: apply the latest builder profile migration.
+- **Profiles do not match across devices**: confirm both are on the same site and joined the same room code.
