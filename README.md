@@ -7,7 +7,6 @@ SideQuest is the people-finding layer for an AI builder meetup or hackathon. The
 SideQuest helps people connect; it does not manage hackathon projects, track build progress, or submit projects to the organizers. The hackathon itself stays the main quest.
 
 - **Live site:** https://sidequest-meetup.vercel.app
-- **GitHub:** https://github.com/Akshitwadhwa/Meetup-Project
 - **Stack:** static HTML, CSS, and browser JavaScript with Supabase Auth and Postgres
 
 ## Main quest: build and submit
